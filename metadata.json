@@ -1,0 +1,6 @@
+{
+  "name": "FOMO",
+  "description": "Production-grade social platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
