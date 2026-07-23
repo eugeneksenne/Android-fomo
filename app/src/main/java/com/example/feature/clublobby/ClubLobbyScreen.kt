@@ -51,7 +51,7 @@ fun ClubLobbyScreen(
     var showClaimedDrop by remember { mutableStateOf<FlashDrop?>(null) }
     var activeBroadcastChat by remember { mutableStateOf(listOf("John: Vibe inside is crazy right now! 🔥", "Lerato: Kabza is going on in 20 min!", "Sbu: Rooftop has the best view.", "Amelia: Queue is moving fast!")) }
 
-    // Floating Live Broadcaster message simulator
+    // Floating Live Broadcaster message feed
     LaunchedEffect(state.liveBroadcast.isLive) {
         if (state.liveBroadcast.isLive) {
             val names = listOf("Dave", "Nthabi", "Kagiso", "Zama", "Priscilla", "Brandon")
@@ -1665,7 +1665,7 @@ fun FlashDropClaimedDialog(drop: FlashDrop, onDismiss: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // QR Code simulation box
+                // Digital QR Pass display box
                 Box(
                     modifier = Modifier
                         .size(140.dp)

@@ -1,5 +1,8 @@
 package com.example.core.data.chat
 
+import android.util.Log
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -162,6 +165,9 @@ data class ChatRepositoryState(
 )
 
 object ChatRepository {
+    private var firestore: FirebaseFirestore? = null
+    private val activeMessageListeners = mutableSetOf<String>()
+
     private val _state = MutableStateFlow(
         ChatRepositoryState(
             conversations = seedInitialConversations(),
@@ -170,6 +176,160 @@ object ChatRepository {
         )
     )
     val state: StateFlow<ChatRepositoryState> = _state.asStateFlow()
+
+    init {
+        initFirebaseSync()
+    }
+
+    fun initFirebaseSync() {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            firestore = db
+
+            db.collection("conversations").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) {
+                    Log.w("ChatRepository", "Firestore listener warning: $error")
+                    return@addSnapshotListener
+                }
+                if (snapshot.isEmpty) {
+                    seedFirestoreConversations(db)
+                } else {
+                    val firestoreConvs = snapshot.documents.mapNotNull { doc ->
+                        val id = doc.id
+                        val name = doc.getString("name") ?: return@mapNotNull null
+                        val avatarUrl = doc.getString("avatarUrl") ?: ""
+                        val typeStr = doc.getString("type") ?: ConversationType.PERSONAL.name
+                        val catStr = doc.getString("category") ?: ChatCategory.ALL.name
+                        val lastMsg = doc.getString("lastMessage") ?: ""
+                        val lastTs = doc.getString("lastMessageTimestamp") ?: ""
+                        val unread = doc.getLong("unreadCount")?.toInt() ?: 0
+                        val isPinned = doc.getBoolean("isPinned") ?: false
+                        val isMuted = doc.getBoolean("isMuted") ?: false
+                        val isArchived = doc.getBoolean("isArchived") ?: false
+                        val isVerified = doc.getBoolean("isVerified") ?: false
+                        val isOnline = doc.getBoolean("isOnline") ?: false
+
+                        ConversationItem(
+                            id = id,
+                            name = name,
+                            avatarUrl = avatarUrl,
+                            type = try { ConversationType.valueOf(typeStr) } catch(e: Exception) { ConversationType.PERSONAL },
+                            category = try { ChatCategory.valueOf(catStr) } catch(e: Exception) { ChatCategory.ALL },
+                            lastMessage = lastMsg,
+                            lastMessageTimestamp = lastTs,
+                            unreadCount = unread,
+                            isPinned = isPinned,
+                            isMuted = isMuted,
+                            isArchived = isArchived,
+                            isVerified = isVerified,
+                            isOnline = isOnline
+                        )
+                    }
+                    if (firestoreConvs.isNotEmpty()) {
+                        _state.update { current ->
+                            current.copy(conversations = firestoreConvs)
+                        }
+                        firestoreConvs.forEach { conv ->
+                            listenToConversationMessages(db, conv.id)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatRepository", "Firestore init skipped or unavailable", e)
+        }
+    }
+
+    private fun listenToConversationMessages(db: FirebaseFirestore, convId: String) {
+        if (activeMessageListeners.contains(convId)) return
+        activeMessageListeners.add(convId)
+
+        db.collection("conversations").document(convId)
+            .collection("messages")
+            .orderBy("timestampMs")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                if (!snapshot.isEmpty) {
+                    val msgs = snapshot.documents.mapNotNull { doc ->
+                        val id = doc.id
+                        val conversationId = doc.getString("conversationId") ?: convId
+                        val senderId = doc.getString("senderId") ?: "me"
+                        val senderName = doc.getString("senderName") ?: "User"
+                        val senderAvatarUrl = doc.getString("senderAvatarUrl") ?: ""
+                        val typeStr = doc.getString("type") ?: RichMessageType.TEXT.name
+                        val content = doc.getString("content") ?: ""
+                        val timestamp = doc.getString("timestamp") ?: ""
+                        val isDelivered = doc.getBoolean("isDelivered") ?: true
+                        val isRead = doc.getBoolean("isRead") ?: true
+
+                        ChatMessage(
+                            id = id,
+                            conversationId = conversationId,
+                            senderId = senderId,
+                            senderName = senderName,
+                            senderAvatarUrl = senderAvatarUrl,
+                            type = try { RichMessageType.valueOf(typeStr) } catch(e: Exception) { RichMessageType.TEXT },
+                            content = content,
+                            timestamp = timestamp,
+                            isDelivered = isDelivered,
+                            isRead = isRead
+                        )
+                    }
+                    _state.update { current ->
+                        val updatedMsgs = current.activeMessages.toMutableMap()
+                        updatedMsgs[convId] = msgs
+                        current.copy(activeMessages = updatedMsgs)
+                    }
+                }
+            }
+    }
+
+    private fun seedFirestoreConversations(db: FirebaseFirestore) {
+        try {
+            val seedConvs = seedInitialConversations()
+            val seedMsgsMap = seedInitialMessages()
+
+            seedConvs.forEach { conv ->
+                val convDoc = mapOf(
+                    "id" to conv.id,
+                    "name" to conv.name,
+                    "avatarUrl" to conv.avatarUrl,
+                    "type" to conv.type.name,
+                    "category" to conv.category.name,
+                    "lastMessage" to conv.lastMessage,
+                    "lastMessageTimestamp" to conv.lastMessageTimestamp,
+                    "unreadCount" to conv.unreadCount,
+                    "isPinned" to conv.isPinned,
+                    "isMuted" to conv.isMuted,
+                    "isArchived" to conv.isArchived,
+                    "isVerified" to conv.isVerified,
+                    "isOnline" to conv.isOnline
+                )
+                db.collection("conversations").document(conv.id).set(convDoc)
+
+                val msgs = seedMsgsMap[conv.id] ?: emptyList()
+                msgs.forEachIndexed { idx, msg ->
+                    val msgDoc = mapOf(
+                        "id" to msg.id,
+                        "conversationId" to msg.conversationId,
+                        "senderId" to msg.senderId,
+                        "senderName" to msg.senderName,
+                        "senderAvatarUrl" to msg.senderAvatarUrl,
+                        "type" to msg.type.name,
+                        "content" to msg.content,
+                        "timestamp" to msg.timestamp,
+                        "timestampMs" to System.currentTimeMillis() - ((msgs.size - idx) * 60000L),
+                        "isDelivered" to msg.isDelivered,
+                        "isRead" to msg.isRead
+                    )
+                    db.collection("conversations").document(conv.id)
+                        .collection("messages").document(msg.id).set(msgDoc)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatRepository", "Error seeding Firestore", e)
+        }
+    }
 
     // --- Group Creation & Management Actions ---
     fun createGroupConversation(
@@ -217,6 +377,45 @@ object ChatRepository {
             val updatedMsgs = current.activeMessages.toMutableMap()
             updatedMsgs[newGroupId] = listOf(initialMsg)
             current.copy(conversations = updatedConvs, activeMessages = updatedMsgs)
+        }
+
+        firestore?.let { db ->
+            try {
+                val convDoc = mapOf(
+                    "id" to newGroup.id,
+                    "name" to newGroup.name,
+                    "avatarUrl" to newGroup.avatarUrl,
+                    "type" to newGroup.type.name,
+                    "category" to newGroup.category.name,
+                    "lastMessage" to newGroup.lastMessage,
+                    "lastMessageTimestamp" to newGroup.lastMessageTimestamp,
+                    "unreadCount" to 0,
+                    "isPinned" to false,
+                    "isMuted" to false,
+                    "isArchived" to false,
+                    "isVerified" to true,
+                    "isOnline" to true
+                )
+                db.collection("conversations").document(newGroup.id).set(convDoc)
+
+                val msgDoc = mapOf(
+                    "id" to initialMsg.id,
+                    "conversationId" to newGroupId,
+                    "senderId" to initialMsg.senderId,
+                    "senderName" to initialMsg.senderName,
+                    "senderAvatarUrl" to initialMsg.senderAvatarUrl,
+                    "type" to initialMsg.type.name,
+                    "content" to initialMsg.content,
+                    "timestamp" to initialMsg.timestamp,
+                    "timestampMs" to System.currentTimeMillis(),
+                    "isDelivered" to true,
+                    "isRead" to true
+                )
+                db.collection("conversations").document(newGroupId)
+                    .collection("messages").document(initialMsg.id).set(msgDoc)
+            } catch (e: Exception) {
+                Log.e("ChatRepository", "Error syncing created group to Firestore", e)
+            }
         }
 
         return newGroup
@@ -420,6 +619,35 @@ object ChatRepository {
                 conversations = updatedConvs,
                 draftMap = drafts
             )
+        }
+
+        firestore?.let { db ->
+            try {
+                val msgDoc = mapOf(
+                    "id" to newMsg.id,
+                    "conversationId" to conversationId,
+                    "senderId" to newMsg.senderId,
+                    "senderName" to newMsg.senderName,
+                    "senderAvatarUrl" to newMsg.senderAvatarUrl,
+                    "type" to newMsg.type.name,
+                    "content" to newMsg.content,
+                    "timestamp" to newMsg.timestamp,
+                    "timestampMs" to System.currentTimeMillis(),
+                    "isDelivered" to true,
+                    "isRead" to true
+                )
+                db.collection("conversations").document(conversationId)
+                    .collection("messages").document(newMsg.id).set(msgDoc)
+
+                val convUpdate = mapOf(
+                    "lastMessage" to if (type == RichMessageType.TEXT) content else "[${type.name.lowercase().replace('_', ' ')}]",
+                    "lastMessageTimestamp" to timestamp
+                )
+                db.collection("conversations").document(conversationId)
+                    .set(convUpdate, SetOptions.merge())
+            } catch (e: Exception) {
+                Log.e("ChatRepository", "Error sending message to Firestore", e)
+            }
         }
     }
 

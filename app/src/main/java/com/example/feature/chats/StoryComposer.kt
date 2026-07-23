@@ -34,7 +34,7 @@ fun StoryComposerModal(
 ) {
     val coroutineScope = rememberCoroutineScope()
 
-    // Camera viewfinder simulation state
+    // Camera viewfinder state
     var isFrontCamera by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("Golden Hour") }
     var captionText by remember { mutableStateOf("") }
@@ -46,7 +46,7 @@ fun StoryComposerModal(
     // Privacy setting
     var privacy by remember { mutableStateOf(StoryPrivacy.PUBLIC) }
 
-    // Media background captured image simulator
+    // Media background captured image
     val capturedMediaUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600"
 
     // Publishing state

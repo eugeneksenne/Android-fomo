@@ -68,6 +68,14 @@ val topLevelRoutes = listOf(
 @Composable
 fun FomoApp() {
     val navController = rememberNavController()
+    val currentUser = androidx.compose.runtime.remember {
+        try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val startDestinationRoute: Any = if (currentUser != null) DiscoverRoute else com.example.core.navigation.WelcomeRoute
 
     Scaffold(
         bottomBar = {
@@ -119,7 +127,7 @@ fun FomoApp() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = com.example.core.navigation.WelcomeRoute,
+            startDestination = startDestinationRoute,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable<com.example.core.navigation.WelcomeRoute> {

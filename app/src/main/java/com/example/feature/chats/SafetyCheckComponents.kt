@@ -480,7 +480,7 @@ fun SafetyCheckDashboardModal(
                             }
 
                             OutlinedButton(
-                                onClick = { NightGuardRepository.simulateMissedCheckEscalation() },
+                                onClick = { NightGuardRepository.escalateMissedCheck() },
                                 modifier = Modifier.weight(1f).height(40.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF3B30)),

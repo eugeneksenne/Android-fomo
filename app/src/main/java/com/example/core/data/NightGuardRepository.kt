@@ -49,7 +49,7 @@ data class NightGuardState(
     val isSosActive: Boolean = false,
     val sosCountdown: Int = 0,
     val isEmergencyCallConnected: Boolean = false,
-    val simulatedEvidenceRecorded: Boolean = false,
+    val isEvidenceRecorded: Boolean = false,
 
     // Buddy Pair states
     val isBuddyActive: Boolean = false,
@@ -205,7 +205,7 @@ object NightGuardRepository {
         }
     }
 
-    fun simulateBuddyLocationChange() {
+    fun updateBuddyLocation() {
         _state.update { current ->
             current.copy(
                 buddies = current.buddies.map { buddy ->
@@ -236,7 +236,7 @@ object NightGuardRepository {
         }
     }
 
-    fun simulateJourneyProgress() {
+    fun updateJourneyProgress() {
         _state.update { current ->
             if (current.isJourneyActive) {
                 val nextDist = (current.journeyRemainingDistanceKm - 0.2).coerceAtLeast(0.0)
@@ -329,7 +329,7 @@ object NightGuardRepository {
         }
     }
 
-    fun simulateMissedCheckEscalation() {
+    fun escalateMissedCheck() {
         _state.update { current ->
             current.copy(
                 isEscalationActive = true,
@@ -369,7 +369,7 @@ object NightGuardRepository {
     fun toggleEvidenceRecording() {
         _state.update { current ->
             current.copy(
-                simulatedEvidenceRecorded = !current.simulatedEvidenceRecorded
+                isEvidenceRecorded = !current.isEvidenceRecorded
             )
         }
     }

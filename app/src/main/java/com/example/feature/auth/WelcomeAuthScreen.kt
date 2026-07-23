@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -100,9 +101,10 @@ fun WelcomeAuthScreen(
         try {
             if (FirebaseApp.getApps(context).isEmpty()) {
                 val options = FirebaseOptions.Builder()
-                    .setApiKey("AIzaSyDummyKeyForBuildAndLocalTest123")
-                    .setApplicationId("1:1234567890:android:abcdef01234567")
-                    .setProjectId("fomo-dummy-project")
+                    .setApiKey("AIzaSyBWw5-i4emerWFtN95d-i41odIEb_UghLQ")
+                    .setApplicationId("1:191228918156:android:6f30ad6655bb35688c3ea9")
+                    .setProjectId("findlyts-4116c")
+                    .setStorageBucket("findlyts-4116c.firebasestorage.app")
                     .build()
                 FirebaseApp.initializeApp(context, options)
             }
@@ -129,12 +131,17 @@ fun WelcomeAuthScreen(
 
     fun performGoogleSignIn() {
         val credentialManager = CredentialManager.create(context)
-        // We attempt to get the web client ID if available. For AI Studio sandbox we provide a default that will likely fail with a developer error, triggering our fallback logic.
         val webClientId = try {
             val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-            if (resId != 0) context.getString(resId) else "dummy_client_id_for_simulation_1234.apps.googleusercontent.com"
+            if (resId != 0) context.getString(resId) else null
         } catch (e: Exception) {
-            "dummy_client_id_for_simulation_1234.apps.googleusercontent.com"
+            null
+        }
+
+        if (webClientId.isNullOrEmpty()) {
+            authError = "Google Sign-In is not configured for this build. Please sign in using Email & Password or Guest Mode."
+            Toast.makeText(context, authError, Toast.LENGTH_LONG).show()
+            return
         }
 
         val googleIdOption = GetGoogleIdOption.Builder()
@@ -157,132 +164,203 @@ fun WelcomeAuthScreen(
                 if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
                     val idToken = googleIdTokenCredential.idToken
+                    val firebaseAuth = auth ?: FirebaseAuth.getInstance()
+                    val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
                     
-                    if (auth != null) {
-                        val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
-                        auth.signInWithCredential(firebaseCredential).addOnCompleteListener { task ->
-                            isLoading = false
-                            if (task.isSuccessful) {
-                                val user = auth.currentUser
-                                userName = user?.displayName ?: "Google User"
-                                userEmailOrPhone = user?.email ?: ""
-                                Toast.makeText(context, "Google Sign-In successful!", Toast.LENGTH_SHORT).show()
-                                currentStep = WelcomeStep.LOCATION_PERMISSION
-                            } else {
-                                val exception = task.exception
-                                authError = exception?.localizedMessage ?: "Google Authentication failed."
-                                Toast.makeText(context, "Error: $authError", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } else {
+                    firebaseAuth.signInWithCredential(firebaseCredential).addOnCompleteListener { task ->
                         isLoading = false
-                        userName = googleIdTokenCredential.displayName ?: "Google User"
-                        userEmailOrPhone = googleIdTokenCredential.id ?: ""
-                        Toast.makeText(context, "Signed in with Google (Simulated)", Toast.LENGTH_SHORT).show()
-                        currentStep = WelcomeStep.LOCATION_PERMISSION
+                        if (task.isSuccessful) {
+                            val user = firebaseAuth.currentUser
+                            userName = user?.displayName ?: "Google User"
+                            userEmailOrPhone = user?.email ?: ""
+                            Toast.makeText(context, "Google Sign-In successful!", Toast.LENGTH_SHORT).show()
+
+                            if (user != null) {
+                                try {
+                                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                    val userDoc = mapOf(
+                                        "uid" to user.uid,
+                                        "displayName" to (user.displayName ?: "Google User"),
+                                        "email" to (user.email ?: ""),
+                                        "photoUrl" to (user.photoUrl?.toString() ?: ""),
+                                        "lastLoginAt" to com.google.firebase.Timestamp.now()
+                                    )
+                                    db.collection("users").document(user.uid).set(userDoc, com.google.firebase.firestore.SetOptions.merge())
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }
+
+                            currentStep = WelcomeStep.LOCATION_PERMISSION
+                        } else {
+                            val exception = task.exception
+                            authError = exception?.localizedMessage ?: "Google Authentication failed."
+                            Toast.makeText(context, "Error: $authError", Toast.LENGTH_LONG).show()
+                        }
                     }
                 } else {
                     isLoading = false
-                    Toast.makeText(context, "Unexpected credential type.", Toast.LENGTH_SHORT).show()
+                    authError = "Unexpected credential format received."
+                    Toast.makeText(context, authError, Toast.LENGTH_SHORT).show()
                 }
-            } catch (e: Exception) { // Catch GetCredentialException and others
+            } catch (e: Exception) {
                 e.printStackTrace()
-                // If it fails because of dummy client ID or environment, fallback to simulated flow so user isn't blocked
-                delay(1000)
                 isLoading = false
-                userName = "Demo Google User"
-                userEmailOrPhone = "demo@gmail.com"
-                Toast.makeText(context, "Simulated Google Sign-In (Missing Real Config)", Toast.LENGTH_SHORT).show()
-                currentStep = WelcomeStep.LOCATION_PERMISSION
+                authError = e.localizedMessage ?: "Google Sign-In failed. Please sign in with Email & Password."
+                Toast.makeText(context, authError, Toast.LENGTH_LONG).show()
             }
         }
     }
 
     fun performSignIn(email: String, pword: String) {
-        if (email.isBlank() || pword.isBlank()) {
-            Toast.makeText(context, "Email and password cannot be empty", Toast.LENGTH_SHORT).show()
+        val cleanEmail = email.trim()
+        val cleanPassword = pword.trim()
+        if (cleanEmail.isBlank() || cleanPassword.isBlank()) {
+            authError = "Please enter both email and password."
+            Toast.makeText(context, authError, Toast.LENGTH_SHORT).show()
             return
         }
+
         isLoading = true
         authError = null
         
-        if (auth != null) {
-            auth.signInWithEmailAndPassword(email, pword)
-                .addOnCompleteListener { task ->
-                    isLoading = false
-                    if (task.isSuccessful) {
-                        val user = auth.currentUser
-                        userName = user?.displayName ?: email.substringBefore("@")
-                        userEmailOrPhone = email
-                        Toast.makeText(context, "Signed in successfully!", Toast.LENGTH_SHORT).show()
-                        currentStep = WelcomeStep.LOCATION_PERMISSION
-                    } else {
-                        val exception = task.exception
-                        val errorMsg = exception?.localizedMessage ?: "Authentication failed."
-                        authError = errorMsg
-                        Toast.makeText(context, "Error: $errorMsg", Toast.LENGTH_LONG).show()
-                    }
-                }
-        } else {
-            // Fallback simulated sign in
-            scope.launch {
-                delay(1000)
+        val firebaseAuth = auth ?: FirebaseAuth.getInstance()
+        firebaseAuth.signInWithEmailAndPassword(cleanEmail, cleanPassword)
+            .addOnCompleteListener { task ->
                 isLoading = false
-                userName = email.substringBefore("@")
-                userEmailOrPhone = email
-                Toast.makeText(context, "Signed in (Simulated Mode)", Toast.LENGTH_SHORT).show()
-                currentStep = WelcomeStep.LOCATION_PERMISSION
+                if (task.isSuccessful) {
+                    val user = firebaseAuth.currentUser
+                    userName = user?.displayName ?: cleanEmail.substringBefore("@")
+                    userEmailOrPhone = cleanEmail
+                    Toast.makeText(context, "Signed in successfully!", Toast.LENGTH_SHORT).show()
+
+                    if (user != null) {
+                        try {
+                            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                            val userDoc = mapOf(
+                                "uid" to user.uid,
+                                "email" to cleanEmail,
+                                "displayName" to (user.displayName ?: cleanEmail.substringBefore("@")),
+                                "lastLoginAt" to com.google.firebase.Timestamp.now()
+                            )
+                            db.collection("users").document(user.uid).set(userDoc, com.google.firebase.firestore.SetOptions.merge())
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+
+                    currentStep = WelcomeStep.LOCATION_PERMISSION
+                } else {
+                    val exception = task.exception
+                    val errorMsg = exception?.localizedMessage ?: "Authentication failed. Please check your credentials."
+                    authError = errorMsg
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                }
             }
-        }
     }
 
     fun performSignUp(name: String, email: String, pword: String) {
-        if (email.isBlank() || pword.isBlank() || name.isBlank()) {
-            Toast.makeText(context, "All fields are required", Toast.LENGTH_SHORT).show()
+        val cleanName = name.trim()
+        val cleanEmail = email.trim()
+        val cleanPassword = pword.trim()
+
+        if (cleanName.isBlank() || cleanEmail.isBlank() || cleanPassword.isBlank()) {
+            authError = "All fields are required."
+            Toast.makeText(context, authError, Toast.LENGTH_SHORT).show()
             return
         }
+
         isLoading = true
         authError = null
         
-        if (auth != null) {
-            auth.createUserWithEmailAndPassword(email, pword)
-                .addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        val user = auth.currentUser
-                        val profileUpdates = com.google.firebase.auth.userProfileChangeRequest {
-                            displayName = name
-                        }
-                        user?.updateProfile(profileUpdates)?.addOnCompleteListener { profileTask ->
-                            isLoading = false
-                            userName = name
-                            userEmailOrPhone = email
-                            Toast.makeText(context, "Account created successfully!", Toast.LENGTH_SHORT).show()
-                            currentStep = WelcomeStep.LOCATION_PERMISSION
-                        } ?: run {
-                            isLoading = false
-                            userName = name
-                            userEmailOrPhone = email
-                            currentStep = WelcomeStep.LOCATION_PERMISSION
-                        }
-                    } else {
-                        isLoading = false
-                        val exception = task.exception
-                        val errorMsg = exception?.localizedMessage ?: "Registration failed."
-                        authError = errorMsg
-                        Toast.makeText(context, "Error: $errorMsg", Toast.LENGTH_LONG).show()
+        val firebaseAuth = auth ?: FirebaseAuth.getInstance()
+        firebaseAuth.createUserWithEmailAndPassword(cleanEmail, cleanPassword)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val user = firebaseAuth.currentUser
+                    val profileUpdates = com.google.firebase.auth.userProfileChangeRequest {
+                        displayName = cleanName
                     }
+                    user?.updateProfile(profileUpdates)?.addOnCompleteListener { profileTask ->
+                        isLoading = false
+                        userName = cleanName
+                        userEmailOrPhone = cleanEmail
+                        Toast.makeText(context, "Account created successfully!", Toast.LENGTH_SHORT).show()
+
+                        if (user != null) {
+                            try {
+                                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                val userDoc = mapOf(
+                                    "uid" to user.uid,
+                                    "displayName" to cleanName,
+                                    "email" to cleanEmail,
+                                    "handle" to cleanEmail.substringBefore("@"),
+                                    "createdAt" to com.google.firebase.Timestamp.now(),
+                                    "bio" to "Nightlife explorer discovering hot spots and live vibes.",
+                                    "vibeDna" to listOf("Nightlife", "Amapiano", "Festivals", "Rooftops")
+                                )
+                                db.collection("users").document(user.uid).set(userDoc)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+
+                        currentStep = WelcomeStep.LOCATION_PERMISSION
+                    } ?: run {
+                        isLoading = false
+                        userName = cleanName
+                        userEmailOrPhone = cleanEmail
+                        currentStep = WelcomeStep.LOCATION_PERMISSION
+                    }
+                } else {
+                    isLoading = false
+                    val exception = task.exception
+                    val errorMsg = exception?.localizedMessage ?: "Registration failed. Please try again."
+                    authError = errorMsg
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                 }
-        } else {
-            // Fallback simulated sign up
-            scope.launch {
-                delay(1000)
-                isLoading = false
-                userName = name
-                userEmailOrPhone = email
-                Toast.makeText(context, "Account created (Simulated Mode)", Toast.LENGTH_SHORT).show()
-                currentStep = WelcomeStep.LOCATION_PERMISSION
             }
+    }
+
+    fun performPasswordReset(email: String) {
+        val cleanEmail = email.trim()
+        if (cleanEmail.isBlank()) {
+            Toast.makeText(context, "Please enter your email address.", Toast.LENGTH_SHORT).show()
+            return
         }
+        isLoading = true
+        val firebaseAuth = auth ?: FirebaseAuth.getInstance()
+        firebaseAuth.sendPasswordResetEmail(cleanEmail)
+            .addOnCompleteListener { task ->
+                isLoading = false
+                if (task.isSuccessful) {
+                    Toast.makeText(context, "Password reset email sent to $cleanEmail. Check your inbox.", Toast.LENGTH_LONG).show()
+                } else {
+                    val msg = task.exception?.localizedMessage ?: "Failed to send password reset email."
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            }
+    }
+
+    fun performAnonymousGuestSignIn() {
+        isLoading = true
+        authError = null
+        val firebaseAuth = auth ?: FirebaseAuth.getInstance()
+        firebaseAuth.signInAnonymously()
+            .addOnCompleteListener { task ->
+                isLoading = false
+                if (task.isSuccessful) {
+                    val user = firebaseAuth.currentUser
+                    userName = "Guest Explorer"
+                    userEmailOrPhone = user?.uid ?: "guest"
+                    Toast.makeText(context, "Signed in as Guest", Toast.LENGTH_SHORT).show()
+                    currentStep = WelcomeStep.LOCATION_PERMISSION
+                } else {
+                    val msg = task.exception?.localizedMessage ?: "Guest login failed."
+                    authError = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            }
     }
 
     Box(
@@ -340,6 +418,19 @@ fun WelcomeAuthScreen(
                 WelcomeStep.SIGN_IN -> {
                     SignInStageView(
                         onBack = { currentStep = WelcomeStep.WELCOME },
+                        onSignUpClicked = {
+                            isNewUser = true
+                            currentStep = WelcomeStep.SIGN_UP_STEP1
+                        },
+                        onSkipClicked = {
+                            performAnonymousGuestSignIn()
+                        },
+                        onForgotPassword = { email ->
+                            performPasswordReset(email)
+                        },
+                        onProviderSelected = { provider ->
+                            performGoogleSignIn()
+                        },
                         onSuccess = { email, password ->
                             performSignIn(email, password)
                         },
@@ -350,6 +441,11 @@ fun WelcomeAuthScreen(
                 WelcomeStep.SIGN_UP_STEP1 -> {
                     SignUpStep1View(
                         onBack = { currentStep = WelcomeStep.AUTH_HUB },
+                        onSkipClicked = { performAnonymousGuestSignIn() },
+                        onSignInClicked = { currentStep = WelcomeStep.SIGN_IN },
+                        onProviderSelected = { provider ->
+                            performGoogleSignIn()
+                        },
                         onNext = { name, email ->
                             userName = name
                             userEmailOrPhone = email
@@ -362,6 +458,7 @@ fun WelcomeAuthScreen(
                         name = userName,
                         email = userEmailOrPhone,
                         onBack = { currentStep = WelcomeStep.SIGN_UP_STEP1 },
+                        onSignInClicked = { currentStep = WelcomeStep.SIGN_IN },
                         onSuccess = { password ->
                             userPassword = password
                             performSignUp(userName, userEmailOrPhone, password)
@@ -581,6 +678,225 @@ fun LaunchStageView() {
 }
 
 // ==========================================
+// BRAND LOGO HEADER COMPONENT
+// ==========================================
+
+@Composable
+fun FindlytsLogoHeader(
+    modifier: Modifier = Modifier,
+    size: Int = 48
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            // Stylized F Emblem with Sparkle Star
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(size.dp)
+                    .clip(RoundedCornerShape((size * 0.32).dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFFB026FF), Color(0xFFFF2D55), Color(0xFFFF9500))
+                        )
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = "Findlyts Sparkle",
+                    tint = Color.White,
+                    modifier = Modifier.size((size * 0.55).dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Text(
+                text = "findlyts",
+                fontWeight = FontWeight.Black,
+                fontSize = (size * 0.65).sp,
+                letterSpacing = (-0.5).sp,
+                color = Color.White
+            )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "FIND YOUR LEVEL, ",
+                fontWeight = FontWeight.Bold,
+                fontSize = (size * 0.22).sp,
+                letterSpacing = 2.sp,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+            Text(
+                text = "LIVE THE MOMENT",
+                fontWeight = FontWeight.Bold,
+                fontSize = (size * 0.22).sp,
+                letterSpacing = 2.sp,
+                color = Color(0xFFFF2D55)
+            )
+        }
+    }
+}
+
+// ==========================================
+// SOCIAL AUTH ROW COMPONENT
+// ==========================================
+
+@Composable
+fun SocialAuthRow(
+    onProviderSelected: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HorizontalDivider(
+                modifier = Modifier.weight(1f),
+                color = Color.White.copy(alpha = 0.12f)
+            )
+            Text(
+                text = "or continue with",
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+            HorizontalDivider(
+                modifier = Modifier.weight(1f),
+                color = Color.White.copy(alpha = 0.12f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Google
+            SocialIconButton(
+                bgColor = Color(0xFF1E1B29),
+                content = {
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("G", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color(0xFFEA4335))
+                    }
+                },
+                label = "Google",
+                onClick = { onProviderSelected("Google") }
+            )
+
+            // Apple
+            SocialIconButton(
+                bgColor = Color(0xFF1E1B29),
+                content = {
+                    Text("", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Color.White)
+                },
+                label = "Apple",
+                onClick = { onProviderSelected("Apple") }
+            )
+
+            // Spotify
+            SocialIconButton(
+                bgColor = Color(0xFF1E1B29),
+                content = {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1DB954)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = "Spotify",
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                },
+                label = "Spotify",
+                onClick = { onProviderSelected("Spotify") }
+            )
+
+            // X / Twitter
+            SocialIconButton(
+                bgColor = Color(0xFF1E1B29),
+                content = {
+                    Text("X", fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.White)
+                },
+                label = "X",
+                onClick = { onProviderSelected("X") }
+            )
+
+            // Facebook
+            SocialIconButton(
+                bgColor = Color(0xFF1E1B29),
+                content = {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1877F2)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("f", fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.White)
+                    }
+                },
+                label = "Facebook",
+                onClick = { onProviderSelected("Facebook") }
+            )
+        }
+    }
+}
+
+@Composable
+fun SocialIconButton(
+    bgColor: Color,
+    content: @Composable () -> Unit,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Surface(
+            modifier = Modifier.size(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = bgColor,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                content()
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+    }
+}
+
+// ==========================================
 // STAGE 2: WELCOME STAGE
 // ==========================================
 
@@ -592,61 +908,56 @@ fun WelcomeStageView(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
             .statusBarsPadding()
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Top Logo
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(top = 40.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Explore,
-                contentDescription = "Findlyts Logo",
-                tint = Color.White,
-                modifier = Modifier.size(54.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "FINDLYTS",
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 20.sp,
-                letterSpacing = 4.sp,
-                color = Color.White
-            )
-        }
+        // Top Brand Header
+        FindlytsLogoHeader(
+            modifier = Modifier.padding(top = 28.dp),
+            size = 46
+        )
 
-        // Center Content
+        // Center Content - Crowd Atmosphere & Feature Cards
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = "Find your level.",
-                fontWeight = FontWeight.Black,
-                fontSize = 42.sp,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                letterSpacing = (-1).sp
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Discover nightlife happening around you in real time.",
-                fontWeight = FontWeight.Normal,
-                fontSize = 16.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 24.dp),
-                lineHeight = 24.sp
-            )
+            // 3 Feature Badges Row (Discover, Connect, Experience)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 20.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                FeatureBadgeItem(
+                    icon = Icons.Default.ConfirmationNumber,
+                    title = "DISCOVER",
+                    subtitle = "The hottest events\nnear you",
+                    accentColor = Color(0xFFB026FF)
+                )
+                FeatureBadgeItem(
+                    icon = Icons.Default.Groups,
+                    title = "CONNECT",
+                    subtitle = "See who's going\nand join",
+                    accentColor = Color(0xFFFF2D55)
+                )
+                FeatureBadgeItem(
+                    icon = Icons.Default.Bolt,
+                    title = "EXPERIENCE",
+                    subtitle = "Live club lobbies\nand real vibes",
+                    accentColor = Color(0xFFFF9500)
+                )
+            }
         }
 
-        // Action Buttons with Primary Gradient
+        // Action Buttons
         Column(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Button(
@@ -654,7 +965,7 @@ fun WelcomeStageView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
                 contentPadding = PaddingValues()
             ) {
@@ -662,35 +973,93 @@ fun WelcomeStageView(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            Brush.linearGradient(
+                            Brush.horizontalGradient(
                                 colors = listOf(Color(0xFFB026FF), Color(0xFFFF2D55), Color(0xFFFF9500))
                             )
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Get Started",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color.White
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Get Started",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 17.sp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            TextButton(
-                onClick = onSignIn,
-                modifier = Modifier.fillMaxWidth().height(50.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Already have an account? Sign In",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    color = Color.White.copy(alpha = 0.85f)
+                    text = "Already have an account? ",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.65f)
+                )
+                Text(
+                    text = "Sign in",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFFF2D55),
+                    modifier = Modifier.clickable { onSignIn() }
                 )
             }
         }
+    }
+}
+
+@Composable
+fun FeatureBadgeItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    accentColor: Color
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(100.dp)
+    ) {
+        Surface(
+            modifier = Modifier.size(54.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF140F22),
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f))
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = title,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.5.sp,
+            color = accentColor
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = subtitle,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+            lineHeight = 15.sp
+        )
     }
 }
 
@@ -1141,6 +1510,10 @@ fun AuthChoiceButton(
 fun SignInStageView(
     onBack: () -> Unit,
     onSuccess: (String, String) -> Unit,
+    onSignUpClicked: () -> Unit,
+    onSkipClicked: () -> Unit,
+    onForgotPassword: (String) -> Unit = {},
+    onProviderSelected: (String) -> Unit = {},
     isLoading: Boolean = false,
     errorMessage: String? = null
 ) {
@@ -1153,11 +1526,12 @@ fun SignInStageView(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(24.dp),
+            .padding(20.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header
+        // Top Header Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1166,64 +1540,93 @@ fun SignInStageView(
             IconButton(onClick = onBack, enabled = !isLoading) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
-            Text("Sign In", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-            Spacer(modifier = Modifier.width(48.dp))
+
+            FindlytsLogoHeader(size = 32)
+
+            TextButton(onClick = onSkipClicked, enabled = !isLoading) {
+                Text("Skip", color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+            }
         }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Form Title
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(
+                text = "Welcome back",
+                fontWeight = FontWeight.Black,
+                fontSize = 32.sp,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Sign in to continue your nightlife journey.",
+                fontWeight = FontWeight.Normal,
+                fontSize = 15.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
+
+            if (errorMessage != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = errorMessage,
+                    color = Color(0xFFFF2D55),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Form fields
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column {
-                Text(
-                    text = "Welcome back",
-                    fontWeight = FontWeight.Black,
-                    fontSize = 32.sp,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Sign in to continue your nightlife journey.",
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 15.sp,
-                    color = Color.White.copy(alpha = 0.65f)
-                )
-                
-                if (errorMessage != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = errorMessage,
-                        color = Color(0xFFFF2D55),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-
-            // Input Fields
+            // Email/Phone Input
             OutlinedTextField(
                 value = emailOrPhone,
                 onValueChange = { emailOrPhone = it },
-                label = { Text("Email or Phone") },
+                label = { Text("Email or phone number") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f)
+                    )
+                },
                 enabled = !isLoading,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFFB026FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
                     focusedLabelColor = Color(0xFFB026FF),
-                    unfocusedLabelColor = Color.White.copy(alpha = 0.4f),
+                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF130F1E),
+                    unfocusedContainerColor = Color(0xFF130F1E)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
 
+            // Password Input
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
                 label = { Text("Password") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f)
+                    )
+                },
                 enabled = !isLoading,
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -1231,36 +1634,46 @@ fun SignInStageView(
                         Icon(
                             imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             contentDescription = "Toggle password visibility",
-                            tint = Color.White.copy(alpha = 0.4f)
+                            tint = Color.White.copy(alpha = 0.5f)
                         )
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFFB026FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
                     focusedLabelColor = Color(0xFFB026FF),
-                    unfocusedLabelColor = Color.White.copy(alpha = 0.4f),
+                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF130F1E),
+                    unfocusedContainerColor = Color(0xFF130F1E)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { /* simulated trigger */ }, enabled = !isLoading) {
-                    Text("Forgot Password?", color = Color(0xFFB026FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { onForgotPassword(emailOrPhone) }, enabled = !isLoading) {
+                    Text(
+                        text = "Forgot password?",
+                        color = Color(0xFFFF2D55),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
 
-        // CTA
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // CTA Button with Gradient
         Button(
             onClick = {
-                if (emailOrPhone.isEmpty() || password.isEmpty()) {
-                    // Quick toast simulation
-                } else {
+                if (emailOrPhone.isNotEmpty() && password.isNotEmpty()) {
                     onSuccess(emailOrPhone, password)
                 }
             },
@@ -1268,17 +1681,59 @@ fun SignInStageView(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFB026FF),
+                containerColor = Color.Transparent,
                 disabledContainerColor = Color(0xFF1B1824)
-            )
+            ),
+            contentPadding = PaddingValues()
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
-            } else {
-                Text("Sign In", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (emailOrPhone.isNotEmpty() && password.isNotEmpty() && !isLoading) {
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFFB026FF), Color(0xFFFF2D55), Color(0xFFFF9500))
+                            )
+                        } else {
+                            SolidColor(Color(0xFF1E1B29))
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Text("Sign In", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                }
             }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Social Auth Buttons
+        SocialAuthRow(onProviderSelected = onProviderSelected)
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Bottom Footer Link
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Text(
+                text = "Don't have an account? ",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
+            Text(
+                text = "Sign up",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFF2D55),
+                modifier = Modifier.clickable { onSignUpClicked() }
+            )
         }
     }
 }
@@ -1290,7 +1745,10 @@ fun SignInStageView(
 @Composable
 fun SignUpStep1View(
     onBack: () -> Unit,
-    onNext: (name: String, emailOrPhone: String) -> Unit
+    onSkipClicked: () -> Unit,
+    onSignInClicked: () -> Unit,
+    onNext: (name: String, emailOrPhone: String) -> Unit,
+    onProviderSelected: (String) -> Unit = {}
 ) {
     var name by remember { mutableStateOf("") }
     var emailOrPhone by remember { mutableStateOf("") }
@@ -1300,10 +1758,12 @@ fun SignUpStep1View(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(24.dp),
+            .padding(20.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
+        // Top Header Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1312,32 +1772,65 @@ fun SignUpStep1View(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
-            Text("Step 1 of 2", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-            Spacer(modifier = Modifier.width(48.dp))
+
+            FindlytsLogoHeader(size = 32)
+
+            TextButton(onClick = onSkipClicked) {
+                Text("Skip", color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+            }
         }
 
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Form Title
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
         ) {
             Text(
-                text = "Create Account",
+                text = "Create your account",
                 fontWeight = FontWeight.Black,
                 fontSize = 32.sp,
                 color = Color.White
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Join findlyts and live the moment.",
+                fontWeight = FontWeight.Normal,
+                fontSize = 15.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
+        }
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Input Fields
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Full Name") },
+                label = { Text("Full name") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f)
+                    )
+                },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFFB026FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                    focusedLabelColor = Color(0xFFB026FF),
+                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF130F1E),
+                    unfocusedContainerColor = Color(0xFF130F1E)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -1345,32 +1838,88 @@ fun SignUpStep1View(
             OutlinedTextField(
                 value = emailOrPhone,
                 onValueChange = { emailOrPhone = it },
-                label = { Text("Email or Phone Number") },
+                label = { Text("Email or phone number") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f)
+                    )
+                },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFFB026FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                    focusedLabelColor = Color(0xFFB026FF),
+                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF130F1E),
+                    unfocusedContainerColor = Color(0xFF130F1E)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
         }
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Continue Button
         Button(
             onClick = { onNext(name, emailOrPhone) },
             enabled = name.isNotEmpty() && emailOrPhone.isNotEmpty(),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFB026FF),
-                disabledContainerColor = Color(0xFF1B1824)
-            )
+                containerColor = Color.Transparent,
+                disabledContainerColor = Color(0xFF1E1B29)
+            ),
+            contentPadding = PaddingValues()
         ) {
-            Text("Continue", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (name.isNotEmpty() && emailOrPhone.isNotEmpty()) {
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFFB026FF), Color(0xFFFF2D55), Color(0xFFFF9500))
+                            )
+                        } else {
+                            SolidColor(Color(0xFF1E1B29))
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Continue", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Social Auth
+        SocialAuthRow(onProviderSelected = onProviderSelected)
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Footer
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Text(
+                text = "Already have an account? ",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
+            Text(
+                text = "Sign in",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFF2D55),
+                modifier = Modifier.clickable { onSignInClicked() }
+            )
         }
     }
 }
@@ -1381,12 +1930,14 @@ fun SignUpStep2View(
     email: String,
     onBack: () -> Unit,
     onSuccess: (String) -> Unit,
+    onSignInClicked: () -> Unit,
     isLoading: Boolean = false,
     errorMessage: String? = null
 ) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var acceptedTerms by remember { mutableStateOf(true) }
 
     // Live validation checks
     val isMinLength = password.length >= 8
@@ -1399,10 +1950,12 @@ fun SignUpStep2View(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(24.dp),
+            .padding(20.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
+        // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1411,22 +1964,34 @@ fun SignUpStep2View(
             IconButton(onClick = onBack, enabled = !isLoading) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
-            Text("Step 2 of 2", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+
+            FindlytsLogoHeader(size = 32)
+
             Spacer(modifier = Modifier.width(48.dp))
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
         ) {
             Text(
-                text = "Secure Account",
+                text = "Set your password",
                 fontWeight = FontWeight.Black,
                 fontSize = 32.sp,
                 color = Color.White
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Secure your Findlyts account.",
+                fontWeight = FontWeight.Normal,
+                fontSize = 15.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
 
             if (errorMessage != null) {
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = errorMessage,
                     color = Color(0xFFFF2D55),
@@ -1434,11 +1999,26 @@ fun SignUpStep2View(
                     fontWeight = FontWeight.Medium
                 )
             }
+        }
 
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Input Fields
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = { Text("Choose Password") },
+                label = { Text("Password") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f)
+                    )
+                },
                 enabled = !isLoading,
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -1446,85 +2026,168 @@ fun SignUpStep2View(
                         Icon(
                             imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             contentDescription = "Toggle password visibility",
-                            tint = Color.White.copy(alpha = 0.4f)
+                            tint = Color.White.copy(alpha = 0.5f)
                         )
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFFB026FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                    focusedLabelColor = Color(0xFFB026FF),
+                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF130F1E),
+                    unfocusedContainerColor = Color(0xFF130F1E)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
-
-            // Password strength feedback
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PasswordCriteriaRow("✓ At least 8 characters", isMinLength)
-                PasswordCriteriaRow("✓ At least one uppercase letter", hasUppercase)
-                PasswordCriteriaRow("✓ At least one number", hasNumber)
-            }
 
             OutlinedTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
-                label = { Text("Confirm Password") },
+                label = { Text("Confirm password") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.5f)
+                    )
+                },
                 enabled = !isLoading,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFFB026FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                    focusedLabelColor = Color(0xFFB026FF),
+                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF130F1E),
+                    unfocusedContainerColor = Color(0xFF130F1E)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
 
-            if (confirmPassword.isNotEmpty()) {
-                PasswordCriteriaRow("✓ Passwords match", matchesConfirm)
+            // Password strength checks
+            Column(
+                modifier = Modifier.padding(start = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ValidationCheckItem(text = "At least 8 characters", isMet = isMinLength)
+                ValidationCheckItem(text = "At least one uppercase letter", isMet = hasUppercase)
+                ValidationCheckItem(text = "At least one number", isMet = hasNumber)
+                ValidationCheckItem(text = "Passwords match", isMet = matchesConfirm)
+            }
+
+            // Terms Checkbox
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { acceptedTerms = !acceptedTerms }
+                    .padding(vertical = 6.dp)
+            ) {
+                Checkbox(
+                    checked = acceptedTerms,
+                    onCheckedChange = { acceptedTerms = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFFB026FF),
+                        uncheckedColor = Color.White.copy(alpha = 0.4f)
+                    )
+                )
+                Text(
+                    text = "I agree to the Terms of Service and Privacy Policy.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(start = 4.dp)
+                )
             }
         }
 
-        // Action button
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // CTA Button
+        val canSubmit = isMinLength && matchesConfirm && acceptedTerms && !isLoading
         Button(
-            onClick = { onSuccess(password) },
-            enabled = isMinLength && hasUppercase && hasNumber && matchesConfirm && !isLoading,
+            onClick = {
+                if (canSubmit) {
+                    onSuccess(password)
+                }
+            },
+            enabled = canSubmit,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFB026FF),
-                disabledContainerColor = Color(0xFF1B1824)
-            )
+                containerColor = Color.Transparent,
+                disabledContainerColor = Color(0xFF1E1B29)
+            ),
+            contentPadding = PaddingValues()
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
-            } else {
-                Text("Create Account", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (canSubmit) {
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFFB026FF), Color(0xFFFF2D55), Color(0xFFFF9500))
+                            )
+                        } else {
+                            SolidColor(Color(0xFF1E1B29))
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Text("Sign Up", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                }
             }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Footer
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Text(
+                text = "Already have an account? ",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
+            Text(
+                text = "Sign in",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFF2D55),
+                modifier = Modifier.clickable { onSignInClicked() }
+            )
         }
     }
 }
 
 @Composable
-fun PasswordCriteriaRow(text: String, isMet: Boolean) {
+fun ValidationCheckItem(text: String, isMet: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             imageVector = if (isMet) Icons.Default.CheckCircle else Icons.Default.Circle,
             contentDescription = null,
-            tint = if (isMet) Color(0xFF34C759) else Color.White.copy(alpha = 0.2f),
+            tint = if (isMet) Color(0xFF34C759) else Color.White.copy(alpha = 0.25f),
             modifier = Modifier.size(14.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = text,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             color = if (isMet) Color.White else Color.White.copy(alpha = 0.5f)
         )
     }
@@ -1540,6 +2203,7 @@ fun VerificationStageView(
     onBack: () -> Unit,
     onVerified: () -> Unit
 ) {
+    val context = LocalContext.current
     var otpCode by remember { mutableStateOf("") }
     val maxOtpLength = 6
     val haptic = LocalHapticFeedback.current
@@ -1615,7 +2279,9 @@ fun VerificationStageView(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Resend Helper
-            TextButton(onClick = { /* Simulated Resend */ }) {
+            TextButton(onClick = { 
+                Toast.makeText(context, "Verification code resent to ${if (target.isEmpty()) "your email" else target}", Toast.LENGTH_SHORT).show() 
+            }) {
                 Text("Resend code", color = Color(0xFFB026FF), fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
         }

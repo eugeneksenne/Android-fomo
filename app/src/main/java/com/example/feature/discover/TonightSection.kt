@@ -115,30 +115,39 @@ fun TonightSection(
                         )
                     }
 
-                    // Live Status Capsule / Plans OS Button
-                    Surface(
-                        color = activeGreen.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, activeGreen),
-                        modifier = Modifier.clickable { onNavigateToPlansWorkspace() }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = activeGreen.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, activeGreen),
+                            modifier = Modifier.clickable { onNavigateToPlansWorkspace() }
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(activeGreen, CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                "PLANS ENGINE ➔",
-                                color = activeGreen,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(activeGreen, CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "PLANS ENGINE ➔",
+                                    color = activeGreen,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "See all",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { onNavigateToPlansWorkspace() }
+                        )
                     }
                 }
 

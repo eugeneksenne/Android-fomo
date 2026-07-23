@@ -384,13 +384,13 @@ fun ProfileScreen(onBackClick: () -> Unit, onSettingsClick: () -> Unit = {}) {
                             )
                         }
                         
-                        // Simulator console
+                        // Activity generator console
                         item {
-                            NotificationSimulatorCard(
-                                onSimulate = { type ->
+                            ActivityConsoleCard(
+                                onGenerate = { type ->
                                     scope.launch {
-                                        val simulated = createSimulatedNotification(type)
-                                        notificationRepository.insert(simulated)
+                                        val newNotif = createSampleNotification(type)
+                                        notificationRepository.insert(newNotif)
                                     }
                                 }
                             )
@@ -835,6 +835,19 @@ fun ProfileScreen(onBackClick: () -> Unit, onSettingsClick: () -> Unit = {}) {
 
 @Composable
 fun HeroSection() {
+    val currentUser = remember {
+        try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val displayName = currentUser?.displayName?.ifEmpty { null }
+        ?: currentUser?.email?.substringBefore("@")
+        ?: if (currentUser?.isAnonymous == true) "Guest Explorer" else "Jordan Reed"
+    val handle = currentUser?.email?.substringBefore("@") ?: "jordan_r"
+    val avatarUrl = currentUser?.photoUrl?.toString() ?: "https://i.pravatar.cc/150?img=11"
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -862,7 +875,7 @@ fun HeroSection() {
                 .padding(horizontal = 24.dp),
         ) {
             AsyncImage(
-                model = "https://i.pravatar.cc/150?img=11",
+                model = avatarUrl,
                 contentDescription = "Profile",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -872,11 +885,11 @@ fun HeroSection() {
             )
             Spacer(modifier = Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Jordan Reed", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(displayName, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.width(6.dp))
                 Icon(Icons.Default.Verified, contentDescription = "Verified", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             }
-            Text("@jordan_r", color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp)
+            Text("@$handle", color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 "Weekend explorer chasing unforgettable experiences in the city.",
@@ -1331,13 +1344,13 @@ fun DiscoverPersonRow(
     }
 }
 
-fun createSimulatedNotification(type: String): com.example.core.data.notification.NotificationEntity {
+fun createSampleNotification(type: String): com.example.core.data.notification.NotificationEntity {
     return com.example.core.data.notification.NotificationEntity(
         type = type,
-        senderName = "Simulated User",
+        senderName = "VIP Member",
         senderAvatar = "https://i.pravatar.cc/150?img=5",
         content = when (type) {
-            "LIKE" -> "liked your story"
+            "LIKE" -> "liked your moment"
             "COMMENT" -> "commented: '🔥 Great vibe!'"
             "MENTION" -> "mentioned you in a post"
             "FOLLOW" -> "started following you"
@@ -1422,19 +1435,19 @@ fun NotificationHeaderSection(
 }
 
 @Composable
-fun NotificationSimulatorCard(onSimulate: (String) -> Unit) {
+fun ActivityConsoleCard(onGenerate: (String) -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("⚡ Activity Console Simulator", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            Text("⚡ Activity Test Actions", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("LIKE", "COMMENT", "MENTION", "FOLLOW").forEach { type ->
                     Button(
-                        onClick = { onSimulate(type) },
+                        onClick = { onGenerate(type) },
                         modifier = Modifier.height(28.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {

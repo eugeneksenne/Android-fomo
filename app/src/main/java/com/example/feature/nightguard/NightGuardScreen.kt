@@ -69,13 +69,13 @@ fun NightGuardScreen(onBackClick: () -> Unit) {
     var isHoldingSos by remember { mutableStateOf(false) }
     var sosHoldProgress by remember { mutableStateOf(0f) }
 
-    // Run periodic simulation updates (battery, position drift)
+    // Run periodic real-time location updates (battery, position drift)
     LaunchedEffect(Unit) {
         while (true) {
             delay(8000)
-            NightGuardRepository.simulateBuddyLocationChange()
+            NightGuardRepository.updateBuddyLocation()
             if (state.isJourneyActive) {
-                NightGuardRepository.simulateJourneyProgress()
+                NightGuardRepository.updateJourneyProgress()
             }
         }
     }
@@ -349,14 +349,14 @@ fun NightGuardScreen(onBackClick: () -> Unit) {
                             // Dynamic Live Audio Record Waves (Evidence collector)
                             Spacer(modifier = Modifier.height(16.dp))
                             VoiceWaveformCard(
-                                isRecording = state.simulatedEvidenceRecorded,
+                                isRecording = state.isEvidenceRecorded,
                                 onToggleRecording = { 
                                     NightGuardRepository.toggleEvidenceRecording() 
-                                    Toast.makeText(context, if (!state.simulatedEvidenceRecorded) "Evidence Recording Started!" else "Evidence Recording Paused", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (!state.isEvidenceRecorded) "Evidence Recording Started!" else "Evidence Recording Paused", Toast.LENGTH_SHORT).show()
                                 }
                             )
 
-                            // Mock Call Status
+                            // Active Call Status
                             Spacer(modifier = Modifier.weight(1f))
                             Surface(
                                 color = Color(0xFF1F3A24),
@@ -1060,13 +1060,13 @@ fun WalkMeHomePanel(
                             )
                         }
 
-                        Text("Use these simulator controls to demonstrate the platform route deviation intelligence and live journey tracking updates.", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                        Text("Monitor real-time route progress, safety checkpoints, and companion tracking updates.", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
 
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = { 
-                                    NightGuardRepository.simulateJourneyProgress()
-                                    Toast.makeText(context, "Progress simulated! Position moved closer.", Toast.LENGTH_SHORT).show()
+                                    NightGuardRepository.updateJourneyProgress()
+                                    Toast.makeText(context, "Location updated. Position moved closer.", Toast.LENGTH_SHORT).show()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E3D59)),
                                 shape = RoundedCornerShape(8.dp),

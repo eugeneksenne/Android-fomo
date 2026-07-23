@@ -1,5 +1,7 @@
 package com.example.core.data.feed
 
+import android.util.Log
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +23,16 @@ data class InvitationData(
     val initialMinutes: Int,
     val venueClosedText: String = "Opens Friday 18:00",
     var status: String = "ACTIVE" // ACTIVE, ENDED, CLOSED
+)
+
+data class NightlifeStory(
+    val id: String,
+    val username: String,
+    val avatarUrl: String,
+    val storyMediaUrl: String,
+    val locationName: String,
+    val isLiveNow: Boolean = false,
+    val hasUnseen: Boolean = true
 )
 
 data class Moment(
@@ -46,18 +58,178 @@ data class Moment(
     val momentumState: String = "Quiet", // "Quiet", "Active", "Heating", "Hot", "Viral"
     val currentVelocity: Float = 0.5f, // ripples per minute
     val isReplayProcessed: Boolean = false,
-    val liveViewers: Int = 0
+    val liveViewers: Int = 0,
+    val audioTrackName: String = "Original Nightlife Audio"
 )
 
 data class FeedState(
     val moments: List<Moment> = emptyList(),
+    val stories: List<NightlifeStory> = emptyList(),
     val activeTab: String = "For You", // "For You", "Following", "Nearby", "Live"
     val isRefreshing: Boolean = false
 )
 
 object FeedRepository {
-    private val _state = MutableStateFlow(FeedState(moments = getInitialMoments()))
+    private var firestore: FirebaseFirestore? = null
+
+    private val _state = MutableStateFlow(FeedState(moments = getInitialMoments(), stories = getInitialStories()))
     val state: StateFlow<FeedState> = _state.asStateFlow()
+
+    init {
+        initFirebaseSync()
+    }
+
+    fun initFirebaseSync() {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            firestore = db
+
+            db.collection("moments").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) {
+                    Log.w("FeedRepository", "Firestore listener warning: $error")
+                    return@addSnapshotListener
+                }
+                if (snapshot.isEmpty) {
+                    seedFirestoreMoments(db)
+                } else {
+                    val firestoreMoments = snapshot.documents.mapNotNull { doc ->
+                        val id = doc.id
+                        val username = doc.getString("username") ?: "User"
+                        val avatarUrl = doc.getString("avatarUrl") ?: ""
+                        val isVerified = doc.getBoolean("isVerified") ?: false
+                        val momentType = doc.getString("momentType") ?: "PHOTO"
+                        val mediaUrl = doc.getString("mediaUrl") ?: ""
+                        val captionOriginal = doc.getString("captionOriginal") ?: ""
+                        val timeAgo = doc.getString("timeAgo") ?: "Just now"
+                        val locationName = doc.getString("locationName") ?: "Truth Nightclub"
+                        val distanceText = doc.getString("distanceText") ?: "250m away"
+                        val ripplesCount = doc.getLong("ripplesCount")?.toInt() ?: 10
+                        val likesCount = doc.getLong("likesCount")?.toInt() ?: 5
+
+                        Moment(
+                            id = id,
+                            username = username,
+                            avatarUrl = avatarUrl,
+                            isVerified = isVerified,
+                            isFollowing = true,
+                            momentType = momentType,
+                            mediaUrl = mediaUrl,
+                            captionOriginal = captionOriginal,
+                            captionTranslation = "",
+                            timeAgo = timeAgo,
+                            locationName = locationName,
+                            distanceText = distanceText,
+                            ripplesCount = ripplesCount,
+                            likesCount = likesCount,
+                            isLiked = false,
+                            isSaved = false,
+                            comments = emptyList(),
+                            friendActivityText = "⚡ Real-time Ripple Moment",
+                            invitation = null,
+                            momentumState = "Hot",
+                            currentVelocity = 5.0f
+                        )
+                    }
+                    if (firestoreMoments.isNotEmpty()) {
+                        _state.update { current ->
+                            val existingIds = firestoreMoments.map { it.id }.toSet()
+                            val localOnly = current.moments.filter { it.id !in existingIds }
+                            current.copy(moments = firestoreMoments + localOnly)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("FeedRepository", "Firestore init skipped or unavailable", e)
+        }
+    }
+
+    private fun seedFirestoreMoments(db: FirebaseFirestore) {
+        try {
+            getInitialMoments().forEach { moment ->
+                val doc = mapOf(
+                    "id" to moment.id,
+                    "username" to moment.username,
+                    "avatarUrl" to moment.avatarUrl,
+                    "isVerified" to moment.isVerified,
+                    "momentType" to moment.momentType,
+                    "mediaUrl" to moment.mediaUrl,
+                    "captionOriginal" to moment.captionOriginal,
+                    "timeAgo" to moment.timeAgo,
+                    "locationName" to moment.locationName,
+                    "distanceText" to moment.distanceText,
+                    "ripplesCount" to moment.ripplesCount,
+                    "likesCount" to moment.likesCount,
+                    "timestampMs" to System.currentTimeMillis()
+                )
+                db.collection("moments").document(moment.id).set(doc)
+            }
+        } catch (e: Exception) {
+            Log.e("FeedRepository", "Error seeding Firestore moments", e)
+        }
+    }
+
+    fun addMoment(
+        username: String,
+        avatarUrl: String,
+        momentType: String,
+        mediaUrl: String,
+        captionOriginal: String,
+        locationName: String
+    ): Moment {
+        val newMoment = Moment(
+            id = "m_${System.currentTimeMillis()}",
+            username = username,
+            avatarUrl = if (avatarUrl.isBlank()) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop" else avatarUrl,
+            isVerified = true,
+            isFollowing = true,
+            momentType = momentType,
+            mediaUrl = if (mediaUrl.isBlank()) "https://images.unsplash.com/photo-1545128485-c400e7702796" else mediaUrl,
+            captionOriginal = captionOriginal,
+            captionTranslation = "",
+            timeAgo = "Just now",
+            locationName = if (locationName.isBlank()) "Truth Nightclub" else locationName,
+            distanceText = "Right here",
+            ripplesCount = 25,
+            likesCount = 1,
+            isLiked = true,
+            isSaved = false,
+            comments = emptyList(),
+            friendActivityText = "⚡ You captured this moment",
+            invitation = null,
+            momentumState = "Heating",
+            currentVelocity = 8.5f
+        )
+
+        _state.update { current ->
+            current.copy(moments = listOf(newMoment) + current.moments)
+        }
+
+        firestore?.let { db ->
+            try {
+                val doc = mapOf(
+                    "id" to newMoment.id,
+                    "username" to newMoment.username,
+                    "avatarUrl" to newMoment.avatarUrl,
+                    "isVerified" to newMoment.isVerified,
+                    "momentType" to newMoment.momentType,
+                    "mediaUrl" to newMoment.mediaUrl,
+                    "captionOriginal" to newMoment.captionOriginal,
+                    "timeAgo" to newMoment.timeAgo,
+                    "locationName" to newMoment.locationName,
+                    "distanceText" to newMoment.distanceText,
+                    "ripplesCount" to newMoment.ripplesCount,
+                    "likesCount" to newMoment.likesCount,
+                    "timestampMs" to System.currentTimeMillis()
+                )
+                db.collection("moments").document(newMoment.id).set(doc)
+            } catch (e: Exception) {
+                Log.e("FeedRepository", "Error adding moment to Firestore", e)
+            }
+        }
+
+        return newMoment
+    }
 
     fun setActiveTab(tab: String) {
         _state.update { it.copy(activeTab = tab) }
@@ -144,6 +316,65 @@ object FeedRepository {
             }
             currentState.copy(moments = updatedMoments)
         }
+    }
+
+    fun markStorySeen(storyId: String) {
+        _state.update { currentState ->
+            val updatedStories = currentState.stories.map { story ->
+                if (story.id == storyId) story.copy(hasUnseen = false) else story
+            }
+            currentState.copy(stories = updatedStories)
+        }
+    }
+
+    private fun getInitialStories(): List<NightlifeStory> {
+        return listOf(
+            NightlifeStory(
+                id = "s1",
+                username = "Amanda",
+                avatarUrl = "https://i.pravatar.cc/150?img=47",
+                storyMediaUrl = "https://images.unsplash.com/photo-1545128485-c400e7702796",
+                locationName = "Cocoon VIP",
+                isLiveNow = true,
+                hasUnseen = true
+            ),
+            NightlifeStory(
+                id = "s2",
+                username = "DJ Zinhle",
+                avatarUrl = "https://i.pravatar.cc/150?img=45",
+                storyMediaUrl = "https://images.unsplash.com/photo-1574169208507-84376144848b",
+                locationName = "Sandton Stage",
+                isLiveNow = true,
+                hasUnseen = true
+            ),
+            NightlifeStory(
+                id = "s3",
+                username = "AfroHaus",
+                avatarUrl = "https://i.pravatar.cc/150?img=12",
+                storyMediaUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7",
+                locationName = "Rooftop Deck",
+                isLiveNow = false,
+                hasUnseen = true
+            ),
+            NightlifeStory(
+                id = "s4",
+                username = "Club 55",
+                avatarUrl = "https://i.pravatar.cc/150?img=18",
+                storyMediaUrl = "https://images.unsplash.com/photo-1566737236500-c8ac43014a67",
+                locationName = "Main Floor",
+                isLiveNow = false,
+                hasUnseen = false
+            ),
+            NightlifeStory(
+                id = "s5",
+                username = "Truth JHB",
+                avatarUrl = "https://i.pravatar.cc/150?img=25",
+                storyMediaUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819",
+                locationName = "Terrace Lounge",
+                isLiveNow = false,
+                hasUnseen = true
+            )
+        )
     }
 
     private fun getInitialMoments(): List<Moment> {

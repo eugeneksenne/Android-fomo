@@ -66,6 +66,7 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     var showPresenceDialog by remember { mutableStateOf(false) }
     var isSearchOpen by remember { mutableStateOf(false) }
     var presenceSelectedPrivacy by remember { mutableStateOf("PUBLIC") }
+    var showCreateMomentSheet by remember { mutableStateOf(false) }
 
     // -------------------------------------------------------------------------
     // LUXURY NIGHTLIFE PALETTE
@@ -603,7 +604,7 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                                 val width = size.width
                                 val height = size.height
 
-                                // Draw simulated lines
+                                // Draw live trend velocity curve
                                 val path = androidx.compose.ui.graphics.Path().apply {
                                     moveTo(0f, height * 0.8f)
                                     quadraticTo(width * 0.3f, height * 0.7f, width * 0.5f, height * 0.4f)
@@ -714,6 +715,48 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                         }
                     },
                     containerColor = cardBg
+                )
+            }
+
+            // -------------------------------------------------------------------------
+            // FLOATING ACTION BUTTON: CAPTURE & POST NEW MOMENT
+            // -------------------------------------------------------------------------
+            FloatingActionButton(
+                onClick = { showCreateMomentSheet = true },
+                containerColor = neonPink,
+                contentColor = Color.White,
+                shape = CircleShape,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 48.dp)
+                    .size(54.dp)
+                    .testTag("create_moment_fab")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Create Moment",
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            // -------------------------------------------------------------------------
+            // OVERLAY: CREATE MOMENT BOTTOM SHEET
+            // -------------------------------------------------------------------------
+            if (showCreateMomentSheet) {
+                CreateMomentSheet(
+                    onDismiss = { showCreateMomentSheet = false },
+                    onPublish = { caption, venue, mediaUrl, momentType ->
+                        com.example.core.data.feed.FeedRepository.addMoment(
+                            username = "You",
+                            avatarUrl = "https://i.pravatar.cc/150?img=12",
+                            momentType = momentType,
+                            mediaUrl = mediaUrl,
+                            captionOriginal = caption,
+                            locationName = venue
+                        )
+                        showCreateMomentSheet = false
+                        Toast.makeText(context, "🎉 Moment published to Feed & synced to Firestore!", Toast.LENGTH_SHORT).show()
+                    }
                 )
             }
         }
@@ -1015,15 +1058,44 @@ fun MomentPlayerItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = if (isTranslated) "See Original" else "Translate Slang / Zulu",
-                    color = Color(0xFF00E5FF),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clickable { isTranslated = !isTranslated }
-                        .padding(vertical = 2.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isTranslated) "See Original" else "Translate Slang / Zulu",
+                        color = Color(0xFF00E5FF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { isTranslated = !isTranslated }
+                            .padding(vertical = 2.dp)
+                    )
+
+                    // Audio Track Badge
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .clickable {
+                                Toast.makeText(context, "🎵 Audio: ${moment.audioTrackName}", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.MusicNote, contentDescription = "Audio Track", tint = Color(0xFF00E5FF), modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = moment.audioTrackName,
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
 
             // MOMENT INVITATION CARD WITH ALL 3 INTERACTIVE STATES SELECTOR
@@ -1226,6 +1298,179 @@ fun AnalyticsCardItem(
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// COMPONENT: CREATE MOMENT BOTTOM SHEET
+// -------------------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateMomentSheet(
+    onDismiss: () -> Unit,
+    onPublish: (caption: String, venue: String, mediaUrl: String, momentType: String) -> Unit
+) {
+    var caption by remember { mutableStateOf("") }
+    var selectedVenue by remember { mutableStateOf("Cocoon Nightclub") }
+    var selectedType by remember { mutableStateOf("PHOTO") }
+    var selectedMediaIndex by remember { mutableIntStateOf(0) }
+
+    val presetImages = listOf(
+        "https://images.unsplash.com/photo-1545128485-c400e7702796",
+        "https://images.unsplash.com/photo-1574169208507-84376144848b",
+        "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7",
+        "https://images.unsplash.com/photo-1566737236500-c8ac43014a67"
+    )
+
+    val venues = listOf("Cocoon Nightclub", "Sandton Stage", "AfroHaus Rooftop", "Marble Lounge", "Truth Nightclub")
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF111726),
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Share Nightlife Moment", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+
+            // Thumbnail visual picker
+            Text("SELECT MEDIA THUMBNAIL", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                presetImages.forEachIndexed { idx, url ->
+                    val isSelected = selectedMediaIndex == idx
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(70.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { selectedMediaIndex = idx }
+                    ) {
+                        AsyncImage(
+                            model = url,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.25f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Caption Field
+            OutlinedTextField(
+                value = caption,
+                onValueChange = { caption = it },
+                label = { Text("Caption & Hashtags") },
+                placeholder = { Text("VIP Booths lit tonight! 🔥 #JHB", color = Color.White.copy(alpha = 0.3f)) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Color(0xFF00E5FF),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    focusedContainerColor = Color.Black.copy(alpha = 0.3f),
+                    unfocusedContainerColor = Color.Black.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+
+            // Venue Selector Chips
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("TAG VENUE LOCATION", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(venues) { venue ->
+                        val isSelected = selectedVenue == venue
+                        Surface(
+                            color = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.1f)),
+                            modifier = Modifier.clickable { selectedVenue = venue }
+                        ) {
+                            Text(
+                                text = venue,
+                                color = if (isSelected) Color(0xFF00E5FF) else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Type Selector Chips
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("MOMENT TYPE", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("PHOTO", "VIDEO", "LIVE").forEach { type ->
+                        val isSelected = selectedType == type
+                        Surface(
+                            color = if (isSelected) Color(0xFFFF2D55).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, if (isSelected) Color(0xFFFF2D55) else Color.White.copy(alpha = 0.1f)),
+                            modifier = Modifier.clickable { selectedType = type }
+                        ) {
+                            Text(
+                                text = type,
+                                color = if (isSelected) Color(0xFFFF2D55) else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Publish Button
+            Button(
+                onClick = {
+                    val finalCaption = if (caption.isBlank()) "Vibing at $selectedVenue 🔥" else caption
+                    onPublish(finalCaption, selectedVenue, presetImages[selectedMediaIndex], selectedType)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))
+            ) {
+                Text("Publish Moment to Feed", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
         }
     }
 }

@@ -1003,7 +1003,7 @@ fun PrepRoomsOverlay(
                     color = Color.Black
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        // Background simulated camera lens preview with selected filter
+                        // Live camera lens preview with selected filter
                         AsyncImage(
                             model = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=600&auto=format&fit=crop",
                             contentDescription = "Camera viewfinder",

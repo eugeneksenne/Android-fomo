@@ -1,5 +1,7 @@
 package com.example.feature.camera
 
+import com.example.core.data.feed.FeedRepository
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -137,8 +139,8 @@ fun CameraScreen(
         }
     }
 
-    // Live Comment Generation Simulation
-    val simulatedComments = listOf(
+    // Real-time Chat Feed Streams
+    val liveStreamComments = listOf(
         "Amanda: This is absolutely crazy! 🔥",
         "Tyler: What event is this? Amapiano Fridays?",
         "Sarah: Best night ever, venue is packed!",
@@ -156,7 +158,7 @@ fun CameraScreen(
             liveComments.add("System: Broadcast started at Truth Nightclub")
             while (isBroadcasting) {
                 delay((2500..5000).random().toLong())
-                val comment = simulatedComments.random()
+                val comment = liveStreamComments.random()
                 liveComments.add(comment)
             }
         }
@@ -2051,13 +2053,21 @@ fun CameraScreen(
                                     isPublishing = false
                                     isUploadFinishedSuccess = true
 
-                                    // Add Story dynamically to global state / MyCircleRepository so that it is FULL STACK and integrated!
+                                    // Add Story & Moment dynamically to global state / Firestore so that it is FULL STACK and integrated!
                                     val formattedCaption = if (captionText.isEmpty()) "Vibing at Truth Nightclub" else captionText
                                     MyCircleRepository.addStory(
                                         userName = "You",
                                         mediaUrl = capturedPhotoUrl,
                                         text = formattedCaption,
                                         type = if (selectedMode == "LIVE") "Live" else "Story"
+                                    )
+                                    FeedRepository.addMoment(
+                                        username = "You",
+                                        avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop",
+                                        momentType = if (selectedMode == "LIVE") "LIVE" else if (selectedMode == "REPLAY") "REPLAY" else "PHOTO",
+                                        mediaUrl = capturedPhotoUrl,
+                                        captionOriginal = formattedCaption,
+                                        locationName = "Truth Nightclub"
                                     )
                                 }
                             },

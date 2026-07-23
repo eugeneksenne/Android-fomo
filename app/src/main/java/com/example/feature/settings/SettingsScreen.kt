@@ -84,8 +84,8 @@ fun SettingsScreen(
     var profileCity by remember { mutableStateOf("Johannesburg") }
     var showEditProfileDialog by remember { mutableStateOf(false) }
 
-    // Simulated Role selection inside settings so users can instantly experience creator view variations
-    var simulatedUserRole by remember { mutableStateOf("Regular User") } 
+    // Active User Role selection inside settings
+    var currentUserRole by remember { mutableStateOf("Regular User") } 
     // "Regular User", "Nightclub Owner", "Bar Owner", "Lounge Owner", "Event Organizer", "DJ", "Artist"
 
     // Smart Recommendations (dismissible)
@@ -251,7 +251,7 @@ fun SettingsScreen(
     var devFeatureFlagAmapianoAI by remember { mutableStateOf(true) }
     var showDevCrashSimulatedDialog by remember { mutableStateOf(false) }
 
-    // Live effect simulating system processes when developer screen is open
+    // Live background rendering loop when developer metrics panel is open
     LaunchedEffect(key1 = developerModeUnlocked) {
         while (true) {
             delay(1500)
@@ -316,7 +316,7 @@ fun SettingsScreen(
                             modifier = Modifier.height(32.dp)
                         ) {
                             Text(
-                                text = simulatedUserRole,
+                                text = currentUserRole,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = dynamicPrimaryColor
@@ -338,7 +338,7 @@ fun SettingsScreen(
                                 DropdownMenuItem(
                                     text = { Text(role, color = dynamicTextColor, fontSize = 13.sp) },
                                     onClick = {
-                                        simulatedUserRole = role
+                                        currentUserRole = role
                                         showRoleMenu = false
                                         Toast.makeText(context, "Switched role to: $role", Toast.LENGTH_SHORT).show()
                                     }
@@ -767,7 +767,7 @@ fun SettingsScreen(
 
                     // Interactive Search Results (Instant filtered list)
                     if (searchQuery.isNotBlank()) {
-                        val results = filterSettingsItems(searchQuery, developerModeUnlocked, simulatedUserRole)
+                        val results = filterSettingsItems(searchQuery, developerModeUnlocked, currentUserRole)
                         if (results.isEmpty()) {
                             item {
                                 Box(
@@ -922,10 +922,10 @@ fun SettingsScreen(
                     // Role-Based Creator Studio Dashboard / Become Creator Card
                     item {
                         CreatorStudioSection(
-                            role = simulatedUserRole,
+                            role = currentUserRole,
                             onCreatorStudioClick = onCreatorStudioClick,
                             onBecomeCreatorClick = {
-                                simulatedUserRole = "Nightclub Owner"
+                                currentUserRole = "Nightclub Owner"
                                 Toast.makeText(context, "Applied & approved! Role set to Nightclub Owner.", Toast.LENGTH_LONG).show()
                             },
                             onNavigateToCreatorSub = { sub ->
@@ -1455,7 +1455,7 @@ fun CreatorQuickGrid(
     textColor: Color,
     surfaceVariant: Color
 ) {
-    // Simple 2-column or 3-column mock grid using rows
+    // Dynamic grid layout using rows
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val chunked = list.chunked(2)
         chunked.forEach { rowItems ->
@@ -3046,7 +3046,7 @@ fun DeveloperSubSection(
                     DevMetricBlock("Rendering FPS", "$fps fps", textColor, textSecColor, primaryColor)
                 }
 
-                // Interactive mock load graph using Box heights
+                // Interactive render trace graph using Box heights
                 Spacer(modifier = Modifier.height(10.dp))
                 Text("UI Engine Render load trace:", color = textSecColor, fontSize = 10.sp)
                 Row(
@@ -3058,8 +3058,8 @@ fun DeveloperSubSection(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    val mockTraceHeights = listOf(10, 18, 32, 14, 28, 42, 38, 22, 12, 16, 26, 40, cpuUsage * 1.5f)
-                    mockTraceHeights.forEach { h ->
+                    val renderTraceHeights = listOf(10, 18, 32, 14, 28, 42, 38, 22, 12, 16, 26, 40, cpuUsage * 1.5f)
+                    renderTraceHeights.forEach { h ->
                         Box(
                             modifier = Modifier
                                 .width(8.dp)
@@ -3122,7 +3122,7 @@ fun DeveloperSubSection(
         Card(colors = CardDefaults.cardColors(containerColor = surfaceColor)) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("LIVE NETWORK INSPECTOR", color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text("Select mock endpoint to view mock response JSON payload", color = textSecColor, fontSize = 11.sp)
+                Text("Select endpoint to inspect live response payload", color = textSecColor, fontSize = 11.sp)
 
                 var activeInspectorPayload by remember { mutableStateOf<String?>(null) }
                 

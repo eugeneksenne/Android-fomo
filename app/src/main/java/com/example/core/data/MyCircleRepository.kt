@@ -1,5 +1,7 @@
 package com.example.core.data
 
+import android.util.Log
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -377,6 +379,60 @@ object MyCircleRepository {
     private val _friendRequestsState = MutableStateFlow<List<FriendRequest>>(initialRequests)
     val friendRequestsState: StateFlow<List<FriendRequest>> = _friendRequestsState.asStateFlow()
 
+    private var firestore: FirebaseFirestore? = null
+
+    init {
+        initFirebaseSync()
+    }
+
+    private fun initFirebaseSync() {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            firestore = db
+            db.collection("stories").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                if (!snapshot.isEmpty) {
+                    val firestoreStories = snapshot.documents.mapNotNull { doc ->
+                        val id = doc.id
+                        val userName = doc.getString("userName") ?: "User"
+                        val userAvatar = doc.getString("userAvatar") ?: ""
+                        val storyType = doc.getString("storyType") ?: "Story"
+                        val mediaUrl = doc.getString("mediaUrl") ?: ""
+                        val musicPlaying = doc.getString("musicPlaying")
+
+                        CircleStory(
+                            id = id,
+                            userName = userName,
+                            userAvatar = userAvatar,
+                            storyType = storyType,
+                            ringColor = when(storyType) {
+                                "Live" -> "#FF2D55"
+                                "Event" -> "#FFD700"
+                                "Venue" -> "#007AFF"
+                                "Close Friends" -> "#34C759"
+                                else -> "#8A2BE2"
+                            },
+                            badgeText = storyType,
+                            timestamp = "Just Now",
+                            mediaUrl = mediaUrl,
+                            musicPlaying = musicPlaying,
+                            isUserStory = true
+                        )
+                    }
+                    if (firestoreStories.isNotEmpty()) {
+                        _storiesState.update { current ->
+                            val existingIds = firestoreStories.map { it.id }.toSet()
+                            val localOnly = current.filter { it.id !in existingIds }
+                            firestoreStories + localOnly
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MyCircleRepository", "Firestore stories init skipped or unavailable", e)
+        }
+    }
+
     // Actions
     fun markStoryViewed(id: String) {
         _storiesState.update { current ->
@@ -406,6 +462,23 @@ object MyCircleRepository {
             isUserStory = true
         )
         _storiesState.update { listOf(newStory) + it }
+
+        firestore?.let { db ->
+            try {
+                val doc = mapOf(
+                    "id" to newStory.id,
+                    "userName" to newStory.userName,
+                    "userAvatar" to newStory.userAvatar,
+                    "storyType" to newStory.storyType,
+                    "mediaUrl" to newStory.mediaUrl,
+                    "musicPlaying" to (newStory.musicPlaying ?: ""),
+                    "timestampMs" to System.currentTimeMillis()
+                )
+                db.collection("stories").document(newStory.id).set(doc)
+            } catch (e: Exception) {
+                Log.e("MyCircleRepository", "Error saving story to Firestore", e)
+            }
+        }
     }
 
     fun handleAcceptRequest(id: String) {

@@ -106,11 +106,7 @@ fun DiscoverScreen(
             ) {
                 item { HeroSection() }
                 item { SectionSpacer() }
-                item { NightGuardQuickBanner(onNavigateToNightGuard) }
-                item { SectionSpacer() }
-                item { CountryPackQuickBanner(onNavigateToCountryPackHub) }
-                item { SectionSpacer() }
-                item { ClosingSoonSection() }
+                item { ClosingSoonSection(onSeeAllClick = { isSmartPlacesHubOpen = true }) }
                 item { SectionSpacer() }
                 item { 
                     FlashDropsSection(
@@ -128,7 +124,7 @@ fun DiscoverScreen(
                     ) 
                 }
                 item { SectionSpacer() }
-                item { LiveMomentsSection() }
+                item { LiveMomentsSection(onSeeAllClick = { isMyCircleHubOpen = true }) }
                 item { SectionSpacer() }
                 item { 
                     SmartPlacesSection(
@@ -138,7 +134,7 @@ fun DiscoverScreen(
                     ) 
                 }
                 item { SectionSpacer() }
-                item { TrendingNowSection() }
+                item { TrendingNowSection(onSeeAllClick = { isExploreTheCityOpen = true }) }
                 item { SectionSpacer() }
                 item { EventsSection(eventsState, onNavigateToEvents, onNavigateToEventDetails) }
                 item { SectionSpacer() }
@@ -369,7 +365,7 @@ fun DiscoverTopBar(unreadCount: Int, onProfileClick: () -> Unit) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             IconButton(
-                onClick = { /*TODO*/ },
+                onClick = { Toast.makeText(context, "Notifications", Toast.LENGTH_SHORT).show() },
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
@@ -635,9 +631,9 @@ fun CountryPackQuickBanner(onClick: () -> Unit) {
 }
 
 @Composable
-fun ClosingSoonSection() {
+fun ClosingSoonSection(onSeeAllClick: () -> Unit = {}) {
     Column {
-        SectionHeader("Closing Soon", "Don't miss out tonight", "See all")
+        SectionHeader("Closing Soon", "Don't miss out tonight", "See all", onActionClick = onSeeAllClick)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -1216,9 +1212,9 @@ fun SmartPlaceCard(
 }
 
 @Composable
-fun LiveMomentsSection() {
+fun LiveMomentsSection(onSeeAllClick: () -> Unit = {}) {
     Column {
-        SectionHeader("Live Moments", "Happening right now", "See all")
+        SectionHeader("Live Moments", "Happening right now", "See all", onActionClick = onSeeAllClick)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -1272,9 +1268,9 @@ fun LiveMomentCard() {
 }
 
 @Composable
-fun TrendingNowSection() {
+fun TrendingNowSection(onSeeAllClick: () -> Unit = {}) {
     Column {
-        SectionHeader("Trending Now", "The city's fastest-growing experiences", "See all")
+        SectionHeader("Trending Now", "The city's fastest-growing experiences", "See all", onActionClick = onSeeAllClick)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -1475,21 +1471,12 @@ fun ExploreTheCitySection(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Section Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Explore The City",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.clickable { onSeeAllClick() }
-            )
-        }
+        SectionHeader(
+            title = "Explore The City",
+            subtitle = "Curated collections & hidden gems across the city",
+            actionText = "See all",
+            onActionClick = onSeeAllClick
+        )
 
         // 1. Dynamic Hero Card
         Box(modifier = Modifier.padding(horizontal = 16.dp).clickable { onSeeAllClick() }) {
@@ -3809,14 +3796,14 @@ fun NearbyTab(
                     }
                 }
 
-                val mockPins = listOf(
+                val activeMemberPins = listOf(
                     Triple("Amanda", Alignment.TopCenter, "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=200&auto=format&fit=crop"),
                     Triple("Jason", Alignment.BottomStart, "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=200&auto=format&fit=crop"),
                     Triple("Sarah", Alignment.CenterEnd, "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop"),
                     Triple("Jessica", Alignment.TopStart, "https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=200&auto=format&fit=crop")
                 )
 
-                mockPins.forEach { (name, align, avatar) ->
+                activeMemberPins.forEach { (name, align, avatar) ->
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier

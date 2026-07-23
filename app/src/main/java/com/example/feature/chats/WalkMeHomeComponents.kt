@@ -578,7 +578,7 @@ fun WalkMeHomeDashboardModal(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { NightGuardRepository.simulateJourneyProgress() },
+                                onClick = { NightGuardRepository.updateJourneyProgress() },
                                 modifier = Modifier.weight(1f).height(40.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),

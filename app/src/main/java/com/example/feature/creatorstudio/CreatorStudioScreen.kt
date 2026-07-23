@@ -605,7 +605,7 @@ fun CreatorStudioScreen(onBackClick: () -> Unit) {
                                             scannerLogType = "ERROR"
                                         }
                                         "INVALID_TOKEN" -> {
-                                            scannerLogMessage = "❌ INVALID QR SECURITY TOKEN\nCryptographic signature mismatch. Possible duplicate/fake pass."
+                                            scannerLogMessage = "❌ INVALID QR SECURITY TOKEN\nCryptographic signature mismatch. Pass invalid."
                                             scannerLogType = "ERROR"
                                         }
                                         "REFUNDED" -> {
@@ -624,7 +624,7 @@ fun CreatorStudioScreen(onBackClick: () -> Unit) {
                                         CreatorRepository.addDoorOrder(price.toString())
                                         Toast.makeText(context, "✓ Checked in $qty walk-in guests. Ticket revenue added.", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "Insufficient Wallet Balance for door simulator preloads", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Insufficient Wallet Balance for door access preloads", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             )
