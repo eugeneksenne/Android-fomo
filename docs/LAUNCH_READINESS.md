@@ -99,6 +99,41 @@ and what still blocks a public release.
 
 ---
 
+## 2b. Camera spec conformance (`Full FOMO Camera`)
+
+Audited against the supplied spec. "Real" = actually functional, not a UI shell.
+
+| Spec subsystem | Status | Notes |
+|---|---|---|
+| Camera Capture Engine (Photo/Video) | ✅ Real | CameraX; saves via MediaStore. |
+| Three modes PHOTO/VIDEO/LIVE | ⚠️ Partial | Present, but **tap-to-switch only — spec requires horizontal swipe.** |
+| Venue Intelligence | ✅ Real | New `VenueIntelligence`: GPS → offline pack → **computed** confidence. Was a hardcoded "Confidence: 99%". |
+| Low-confidence fallback (Nearby/Search/Skip) | ⚠️ Partial | Nearby + Skip implemented; **venue search not built.** |
+| Publish Settings (visibility/destination/venue) | ✅ Real | **Was a privacy bug** — settings were collected then discarded; "Private" posted publicly. Now enforced. |
+| Upload Engine (per-destination progress) | ⚠️ Partial | Real Firebase Storage upload + real %; **per-destination checklist still cosmetic.** |
+| Looks (12 profiles) | ⚠️ Preview-only | Colour overlays on preview; **not baked into the saved file.** No GPU shader pipeline. |
+| Looks long-press intensity | ❌ Missing | Spec requires it. |
+| Looks carousel placement | ⚠️ Deviates | Spec puts it full-width below capture; it is a 90dp column beside it. |
+| Creative Effects (11) | ⚠️ Preview-only | Same as Looks — not applied to output. |
+| Moment Templates (10) | ❌ Cosmetic | UI list only; no template is applied. |
+| Sound Aware Engine | ❌ Fake | **No audio is sampled.** BPM is `(120..128).random()`. No beat/bass/drop detection, no beat-reactive effects. |
+| Dual Shot Engine | ❌ Removed | Was a stock photo of an unrelated person. Real version needs CameraX concurrent camera (device-gated). |
+| AI Scene Recognition | ❌ Missing | No classifier. |
+| AI Moment Processing | ❌ Fake | The "best frame / stabilisation / noise reduction" steps are `delay()` calls. |
+| AI Capture Suggestions | ❌ Fake | Static strings, not context-driven. |
+| Event Intelligence | ❌ Missing | No event linking. |
+| Offline Engine / drafts / queue | ❌ Missing | "Drafts" button shows a Toast. No queue, no retry, no offline capture path. |
+| Ripple Integration | ⚠️ Cosmetic | "+25 Ripple Points" is a fixed literal. |
+| Performance targets (250 ms, 60 FPS) | ❓ Unverified | Never profiled — nothing has been run. |
+| Creator Tools | ❌ Missing | None of the 8 items exist. |
+
+**Net:** roughly 4 of ~20 spec subsystems are genuinely implemented. The camera
+now *captures and publishes correctly*, which it did not before, but the
+differentiating engines (Sound Aware, Dual Shot, AI processing, Offline queue)
+are still absent.
+
+---
+
 ## 3. Remaining blockers before you can publish
 
 1. **Rotate the leaked Firebase credentials.** API key `AIzaSyBWw5-…UghLQ`, project

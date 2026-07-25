@@ -2,6 +2,9 @@ package com.example.feature.camera
 
 import com.example.core.data.feed.FeedRepository
 import com.example.core.data.media.MediaUploader
+import com.example.core.data.venue.VenueIntelligence
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 import android.net.Uri
 import androidx.camera.core.ImageCapture
@@ -107,6 +110,62 @@ fun CameraScreen(
         mutableStateOf(CameraCaptureController.hasCameraPermission(context))
     }
     var cameraError by remember { mutableStateOf<String?>(null) }
+
+    // ---- Venue Intelligence Engine ----------------------------------------
+    // GPS -> Offline Venue Pack -> Confidence Score -> Venue Identified.
+    // Replaces the hardcoded "Truth Nightclub / Confidence: 99%" label.
+    var venueState by remember {
+        mutableStateOf<VenueIntelligence.VenueState>(VenueIntelligence.VenueState.Detecting)
+    }
+    var manualVenueName by remember { mutableStateOf<String?>(null) }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val granted = grants[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            coroutineScope.launch { venueState = VenueIntelligence.detect(context) }
+        } else {
+            venueState = VenueIntelligence.VenueState.PermissionDenied
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (VenueIntelligence.hasLocationPermission(context)) {
+            venueState = VenueIntelligence.detect(context)
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    // Venue actually attached to a published moment.
+    val detectedVenueName: String = manualVenueName
+        ?: (venueState as? VenueIntelligence.VenueState.Identified)?.match?.venueName
+        ?: ""
+
+    val venueNeedsAttention: Boolean = manualVenueName == null &&
+        venueState !is VenueIntelligence.VenueState.Identified &&
+        venueState !is VenueIntelligence.VenueState.Detecting
+
+    val venueSubtitle: String = when {
+        manualVenueName != null -> "Selected manually"
+        else -> when (val st = venueState) {
+            is VenueIntelligence.VenueState.Detecting -> "Detecting venue..."
+            is VenueIntelligence.VenueState.PermissionDenied -> "Tap to choose a venue"
+            is VenueIntelligence.VenueState.NoLocation -> "No GPS signal - tap to choose"
+            is VenueIntelligence.VenueState.NoVenueNearby -> "No venue nearby - tap to choose"
+            is VenueIntelligence.VenueState.LowConfidence ->
+                "Not sure - tap to confirm (${st.candidates.firstOrNull()?.confidencePercent ?: 0}%)"
+            is VenueIntelligence.VenueState.Identified ->
+                "Confidence: ${st.match.confidencePercent}%"
+        }
+    }
     // Real signed-in identity, rather than a hardcoded stock portrait.
     val currentUserAvatarUrl = remember {
         runCatching {
@@ -178,7 +237,10 @@ fun CameraScreen(
     LaunchedEffect(isBroadcasting) {
         if (isBroadcasting) {
             liveComments.clear()
-            liveComments.add("System: Broadcast started at Truth Nightclub")
+            liveComments.add(
+                if (detectedVenueName.isNotBlank()) "System: Broadcast started at $detectedVenueName"
+                else "System: Broadcast started"
+            )
             while (isBroadcasting) {
                 delay((2500..5000).random().toLong())
                 val comment = liveStreamComments.random()
@@ -618,14 +680,18 @@ fun CameraScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Text(
-                                    text = "Truth Nightclub",
+                                    text = detectedVenueName.ifBlank { "No venue" },
                                     color = Color.White,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 13.sp
                                 )
+                                // Real detection state and a computed confidence
+                                // score. This previously read a hardcoded
+                                // "Amapiano Fridays - Confidence: 99%" no matter
+                                // where the device actually was.
                                 Text(
-                                    text = "Amapiano Fridays • Confidence: 99%",
-                                    color = Color(0xFFFFD700),
+                                    text = venueSubtitle,
+                                    color = if (venueNeedsAttention) Color(0xFFFF9F43) else Color(0xFFFFD700),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
@@ -667,21 +733,101 @@ fun CameraScreen(
 
                                 Divider(color = Color.White.copy(alpha = 0.15f))
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column {
-                                        Text("FOMO Club / Truth", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                        Text("Rosebank, JHB • 1.2 km away", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                                // Real detection result, with the spec's
+                                // low-confidence fallback: Nearby / Search / Skip.
+                                when (val st = venueState) {
+                                    is VenueIntelligence.VenueState.Identified -> {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column {
+                                                Text(st.match.venueName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                Text(
+                                                    "${st.match.distanceMetres.roundToInt()} m away • ${st.match.confidencePercent}% match",
+                                                    color = Color.White.copy(alpha = 0.6f),
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        }
                                     }
-                                    Box(
-                                        modifier = Modifier
-                                            .background(Color(0xFFFF2D55), RoundedCornerShape(12.dp))
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("LIVE NOW", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+
+                                    is VenueIntelligence.VenueState.LowConfidence -> {
+                                        Text(
+                                            "Not sure which venue you're at. Pick one:",
+                                            color = Color.White.copy(alpha = 0.75f),
+                                            fontSize = 11.sp
+                                        )
+                                        st.candidates.forEach { candidate ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        manualVenueName = candidate.venueName
+                                                        isVenuePillExpanded = false
+                                                    }
+                                                    .padding(vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(candidate.venueName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    "${candidate.distanceMetres.roundToInt()} m",
+                                                    color = Color.White.copy(alpha = 0.5f),
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                        }
+                                        TextButton(onClick = {
+                                            manualVenueName = ""
+                                            isVenuePillExpanded = false
+                                        }) {
+                                            Text("Skip - don't attach a venue", color = Color(0xFFFF9F43), fontSize = 11.sp)
+                                        }
+                                    }
+
+                                    is VenueIntelligence.VenueState.PermissionDenied -> {
+                                        Text(
+                                            "Location is off, so FOMO can't detect your venue.",
+                                            color = Color.White.copy(alpha = 0.75f),
+                                            fontSize = 11.sp
+                                        )
+                                        TextButton(onClick = {
+                                            locationPermissionLauncher.launch(
+                                                arrayOf(
+                                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                                )
+                                            )
+                                        }) {
+                                            Text("Enable location", color = Color(0xFFFF2D55), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    is VenueIntelligence.VenueState.Detecting -> {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            CircularProgressIndicator(
+                                                color = Color(0xFFFF2D55),
+                                                strokeWidth = 2.dp,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Detecting venue...", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                                        }
+                                    }
+
+                                    else -> {
+                                        Text(
+                                            "No venue detected nearby.",
+                                            color = Color.White.copy(alpha = 0.75f),
+                                            fontSize = 11.sp
+                                        )
+                                        TextButton(onClick = {
+                                            coroutineScope.launch { venueState = VenueIntelligence.detect(context) }
+                                        }) {
+                                            Text("Retry detection", color = Color(0xFFFF2D55), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
 
@@ -707,7 +853,7 @@ fun CameraScreen(
                                     Button(
                                         onClick = {
                                             isVenuePillExpanded = false
-                                            Toast.makeText(context, "Routing to Truth Nightclub Entrance...", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Routing to ${detectedVenueName.ifBlank { "the venue" }}...", Toast.LENGTH_SHORT).show()
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f)),
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
@@ -1572,7 +1718,7 @@ fun CameraScreen(
                     )
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
-                        text = "Anchor: Truth Nightclub",
+                        text = "Anchor: ${detectedVenueName.ifBlank { "No venue" }}",
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
@@ -2146,7 +2292,7 @@ fun CameraScreen(
                         ) {
                             Column {
                                 Text("Share Location Stamp", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("Add 'Truth Nightclub' landmark and badge tags", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                Text("Add '${detectedVenueName.ifBlank { "venue" }}' landmark and badge tags", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                             }
                             Switch(
                                 checked = isShareLocationEnabled,
@@ -2189,21 +2335,35 @@ fun CameraScreen(
                                         onSuccess = { downloadUrl ->
                                             publishStep = 4
                                             val formattedCaption =
-                                                if (captionText.isEmpty()) "Vibing at Truth Nightclub" else captionText
+                                                captionText.ifEmpty {
+                                                    if (isShareLocationEnabled) "Vibing at $detectedVenueName" else "Tonight"
+                                                }
 
-                                            MyCircleRepository.addStory(
-                                                userName = "You",
-                                                mediaUrl = downloadUrl,
-                                                text = formattedCaption,
-                                                type = if (selectedMode == "LIVE") "Live" else "Story"
-                                            )
+                                            // Honour the author's publish settings.
+                                            // These were previously collected and
+                                            // then discarded: a moment marked
+                                            // "Private" with "Hide Venue" was still
+                                            // posted publicly with the venue attached.
+                                            val destinations = selectedDestinations.value
+
+                                            if (destinations.contains("Profile Story")) {
+                                                MyCircleRepository.addStory(
+                                                    userName = "You",
+                                                    mediaUrl = downloadUrl,
+                                                    text = formattedCaption,
+                                                    type = if (selectedMode == "LIVE") "Live" else "Story"
+                                                )
+                                            }
                                             FeedRepository.addMoment(
                                                 username = "You",
                                                 avatarUrl = currentUserAvatarUrl,
                                                 momentType = if (capturedIsVideo) "VIDEO" else "PHOTO",
                                                 mediaUrl = downloadUrl,
                                                 captionOriginal = formattedCaption,
-                                                locationName = "Truth Nightclub"
+                                                locationName = if (isShareLocationEnabled) detectedVenueName else "",
+                                                visibility = selectedVisibility,
+                                                destinations = destinations,
+                                                isVenueShared = isShareLocationEnabled
                                             )
                                             isPublishing = false
                                             isUploadFinishedSuccess = true
@@ -2288,7 +2448,9 @@ fun CameraScreen(
                         // Step-by-step Upload Engine Checkpoints
                         val uploadStages = listOf(
                             "Uploading HDR media assets safely..." to 1,
-                            "Adding venue anchoring to Truth Nightclub..." to 2,
+                            (if (isShareLocationEnabled && detectedVenueName.isNotBlank())
+                                "Adding venue anchoring to $detectedVenueName..."
+                             else "Preparing moment metadata...") to 2,
                             "Broadcasting to feed and followers..." to 3,
                             "Syncing global Ripple ranking system..." to 4
                         )
@@ -2358,7 +2520,15 @@ fun CameraScreen(
 
                         Text("MOMENT PUBLISHED!", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp, letterSpacing = 1.sp)
                         Text(
-                            text = "Your moment has been uploaded successfully. It is now pinned to Truth Nightclub, and published to your Feed story tray!",
+                            text = buildString {
+                                append("Your moment has been uploaded successfully.")
+                                if (isShareLocationEnabled && detectedVenueName.isNotBlank()) {
+                                    append(" It is pinned to $detectedVenueName.")
+                                }
+                                append(" Published to: ")
+                                append(selectedDestinations.value.joinToString(", "))
+                                append(".")
+                            },
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 11.sp,
                             textAlign = TextAlign.Center
@@ -2378,7 +2548,11 @@ fun CameraScreen(
                                 Icon(Icons.Default.TrendingUp, null, tint = Color(0xFFFFD700), modifier = Modifier.size(20.dp))
                                 Column {
                                     Text("RIPPLE BOOSTED! ⚡", color = Color(0xFFFFD700), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    Text("+25 Ripple Points earned at Truth Club", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp)
+                                    Text(
+                                        if (detectedVenueName.isNotBlank()) "+25 Ripple Points earned at $detectedVenueName"
+                                        else "+25 Ripple Points earned",
+                                        color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp
+                                    )
                                 }
                             }
                         }

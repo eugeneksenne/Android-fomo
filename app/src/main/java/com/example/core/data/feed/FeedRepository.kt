@@ -59,8 +59,25 @@ data class Moment(
     val currentVelocity: Float = 0.5f, // ripples per minute
     val isReplayProcessed: Boolean = false,
     val liveViewers: Int = 0,
-    val audioTrackName: String = "Original Nightlife Audio"
+    val audioTrackName: String = "Original Nightlife Audio",
+    // Publish settings chosen by the author on the Camera preview screen.
+    // These were previously collected in the UI and then discarded, so a
+    // moment marked "Private" was still published publicly with its venue
+    // attached. They are now carried on the model and enforced.
+    val visibility: String = VISIBILITY_PUBLIC, // Public | Followers | Private
+    val destinations: Set<String> = setOf(DESTINATION_FEED),
+    val isVenueShared: Boolean = true
 )
+
+const val VISIBILITY_PUBLIC = "Public"
+const val VISIBILITY_FOLLOWERS = "Followers"
+const val VISIBILITY_PRIVATE = "Private"
+
+const val DESTINATION_FEED = "Feed"
+const val DESTINATION_VENUE = "Venue"
+const val DESTINATION_CLUB_LOBBY = "Club Lobby"
+const val DESTINATION_EVENT = "Event Details"
+const val DESTINATION_PROFILE = "Profile Story"
 
 data class FeedState(
     val moments: List<Moment> = emptyList(),
@@ -179,7 +196,10 @@ object FeedRepository {
         momentType: String,
         mediaUrl: String,
         captionOriginal: String,
-        locationName: String
+        locationName: String,
+        visibility: String = VISIBILITY_PUBLIC,
+        destinations: Set<String> = setOf(DESTINATION_FEED),
+        isVenueShared: Boolean = true
     ): Moment {
         val newMoment = Moment(
             id = "m_${System.currentTimeMillis()}",
@@ -192,8 +212,13 @@ object FeedRepository {
             captionOriginal = captionOriginal,
             captionTranslation = "",
             timeAgo = "Just now",
-            locationName = if (locationName.isBlank()) "Truth Nightclub" else locationName,
-            distanceText = "Right here",
+            // Respect the author's "Hide Venue" choice.
+            locationName = when {
+                !isVenueShared -> ""
+                locationName.isBlank() -> "Truth Nightclub"
+                else -> locationName
+            },
+            distanceText = if (isVenueShared) "Right here" else "",
             ripplesCount = 25,
             likesCount = 1,
             isLiked = true,
@@ -202,17 +227,39 @@ object FeedRepository {
             friendActivityText = "⚡ You captured this moment",
             invitation = null,
             momentumState = "Heating",
-            currentVelocity = 8.5f
+            currentVelocity = 8.5f,
+            visibility = visibility,
+            destinations = destinations,
+            isVenueShared = isVenueShared
         )
 
-        _state.update { current ->
-            current.copy(moments = listOf(newMoment) + current.moments)
+        // Only surface the moment in the local feed when the author actually
+        // chose to publish it there.
+        if (destinations.contains(DESTINATION_FEED)) {
+            _state.update { current ->
+                current.copy(moments = listOf(newMoment) + current.moments)
+            }
+        }
+
+        // A "Private" moment must never reach the shared `moments` collection.
+        // It stays local to this device until a per-user private collection
+        // exists. Publishing it here would make it world-readable.
+        if (visibility == VISIBILITY_PRIVATE) {
+            return newMoment
         }
 
         firestore?.let { db ->
             try {
                 val doc = mapOf(
                     "id" to newMoment.id,
+                    "visibility" to newMoment.visibility,
+                    "destinations" to newMoment.destinations.toList(),
+                    "isVenueShared" to newMoment.isVenueShared,
+                    "authorId" to (
+                        runCatching {
+                            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                        }.getOrNull() ?: ""
+                    ),
                     "username" to newMoment.username,
                     "avatarUrl" to newMoment.avatarUrl,
                     "isVerified" to newMoment.isVerified,
