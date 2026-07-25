@@ -1,36 +1,96 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
-
 plugins {
   alias(libs.plugins.android.application)
+  // AGP 8.x does not bundle Kotlin support, so the Android Kotlin plugin must
+  // be applied explicitly (AGP 9 made this implicit).
+  alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
-  alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
-  alias(libs.plugins.google.services)
   alias(libs.plugins.kotlin.serialization)
 }
 
+// Apply the Google Services plugin ONLY when google-services.json is present.
+//
+// The plugin fails the build outright when the file is missing, which would
+// stop the project building on a fresh clone. Applying it conditionally means
+// the app compiles and runs immediately after import (Firebase features then
+// fall back to local-only mode), and light up automatically once you drop in
+// your google-services.json.
+if (file("google-services.json").exists()) {
+  apply(plugin = "com.google.gms.google-services")
+}
+
+// Character constants; avoids fragile nested escaping in string templates.
+val QUOTE = "\""
+val BACKSLASH = "\\"
+
+/**
+ * Loads key=value pairs from `.env`, falling back to `.env.example`.
+ * Missing files are not an error - the app degrades to local-only mode.
+ */
+val fomoSecrets: Map<String, String> = run {
+  val result = mutableMapOf<String, String>()
+  listOf(rootProject.file(".env.example"), rootProject.file(".env")).forEach { file ->
+    if (file.exists()) {
+      file.readLines().forEach { line ->
+        val trimmed = line.trim()
+        if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+          val key = trimmed.substringBefore("=").trim()
+          val value = trimmed.substringAfter("=").trim()
+          // A real .env overrides the example template.
+          if (value.isNotEmpty() && !value.startsWith("your_")) result[key] = value
+          else result.putIfAbsent(key, "")
+        }
+      }
+    }
+  }
+  result
+}
+
 android {
+  // NOTE: this is the *namespace* (the package for generated R and BuildConfig
+  // classes), not the published app id. Google Play only ever sees
+  // `applicationId` below, which is already a real package.
+  //
+  // Renaming the namespace means moving ~80 source files; do it with Android
+  // Studio's "Refactor > Rename package" once you have a green build, so the
+  // IDE updates every import for you.
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 35
 
   defaultConfig {
     applicationId = "com.findlyts.fomo"
     minSdk = 24
-    targetSdk = 36
+    targetSdk = 35
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    // NOTE: Firebase / Google Sign-In configuration is NOT declared here.
-    // The Secrets Gradle plugin (configured below) reads every key from `.env`
-    // — falling back to `.env.example` — and generates the matching
-    // BuildConfig fields automatically:
-    //   FIREBASE_API_KEY, FIREBASE_APP_ID, FIREBASE_PROJECT_ID,
-    //   FIREBASE_STORAGE_BUCKET, GOOGLE_WEB_CLIENT_ID
-    // Declaring them manually here would produce duplicate-field compile errors.
-    // These values previously lived hardcoded in WelcomeAuthScreen.kt.
+    // Firebase / Google Sign-In configuration.
+    //
+    // Read from `.env` (git-ignored) when present, else `.env.example`, else
+    // empty. Implemented with plain Gradle rather than the Secrets Gradle
+    // plugin: that plugin is a third-party dependency that has not been
+    // validated against AGP 9, and a broken plugin would stop the project
+    // opening at all. This does the same job in a few lines with no extra
+    // moving parts.
+    //
+    // Empty values are safe: FomoApplication detects them and runs the app in
+    // local-only mode rather than crashing.
+    listOf(
+      "FIREBASE_API_KEY",
+      "FIREBASE_APP_ID",
+      "FIREBASE_PROJECT_ID",
+      "FIREBASE_STORAGE_BUCKET",
+      "GOOGLE_WEB_CLIENT_ID",
+      "MAPS_API_KEY",
+      "GEMINI_API_KEY",
+    ).forEach { key ->
+      val raw = fomoSecrets[key].orEmpty()
+      // Escape so the value forms a valid Kotlin string literal.
+      val escaped = raw.replace(BACKSLASH, BACKSLASH + BACKSLASH).replace(QUOTE, BACKSLASH + QUOTE)
+      buildConfigField("String", key, QUOTE + escaped + QUOTE)
+    }
   }
 
   // Release signing is driven entirely by environment variables so that no
@@ -128,10 +188,10 @@ android {
   bundle {
     language { enableSplit = false }
   }
-  // AGP 9.x requires JDK 17. Java 11 targets no longer build.
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    isCoreLibraryDesugaringEnabled = false
   }
   buildFeatures {
     compose = true
@@ -161,15 +221,6 @@ kotlin {
   }
 }
 
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-}
-
-googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
-
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
@@ -179,7 +230,6 @@ dependencies {
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.auth)
   implementation(libs.firebase.storage)
-  implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // CameraX - the Camera screen captures real photos/video (was previously a
   // static Unsplash image standing in for a viewfinder).
@@ -207,8 +257,7 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  implementation("androidx.browser:browser:1.8.0")
-  // implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.browser)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -220,38 +269,22 @@ dependencies {
   // Decodes a frame from local video Uris. Without this artifact Coil cannot
   // read video at all and every clip thumbnail renders blank.
   implementation(libs.coil.video)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
-
-  // Firebase Auth with Google Sign-In requires all of the following to be uncommented together.
-  // If you are using Firebase Auth with other providers (e.g. Email/Password), you may only need
-  // firebase-auth.
-  implementation(libs.firebase.auth)
+  // Google Sign-In via Credential Manager.
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // Provides Task.await() for the Firebase Storage upload path.
   implementation(libs.kotlinx.coroutines.play.services)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
-  implementation(libs.okhttp)
   // Venue Intelligence: GPS fix for venue detection on the Camera screen.
   implementation(libs.play.services.location)
-  implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
-  testImplementation(libs.roborazzi)
-  testImplementation(libs.roborazzi.compose)
-  testImplementation(libs.roborazzi.junit.rule)
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.espresso.core)
@@ -260,5 +293,4 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
 }

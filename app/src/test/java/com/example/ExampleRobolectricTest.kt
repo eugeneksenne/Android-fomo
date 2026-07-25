@@ -9,7 +9,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34]) // Robolectric 4.16 has no SDK 36 image; 34 is well supported.
 class ExampleRobolectricTest {
 
   @Test

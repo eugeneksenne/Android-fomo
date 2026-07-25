@@ -14,7 +14,6 @@ import androidx.compose.ui.test.performClick
 import com.example.feature.discover.ExploreTheCitySection
 import com.example.feature.discover.VenuePreviewOverlay
 import com.example.ui.theme.MyApplicationTheme
-import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,7 +23,9 @@ import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(qualifiers = RobolectricDeviceQualifiers.Pixel8, sdk = [36])
+// Pixel 8 equivalent qualifiers, expressed directly so the test does not
+// depend on the Roborazzi plugin, which was removed from the build.
+@Config(qualifiers = "w411dp-h914dp-normal-long-notround-any-420dpi-keyshidden-nonav", sdk = [34])
 class ExploreTheCityTest {
 
     @get:Rule
