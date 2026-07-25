@@ -106,7 +106,7 @@ Audited against the supplied spec. "Real" = actually functional, not a UI shell.
 | Spec subsystem | Status | Notes |
 |---|---|---|
 | Camera Capture Engine (Photo/Video) | ✅ Real | CameraX; saves via MediaStore. |
-| Three modes PHOTO/VIDEO/LIVE | ⚠️ Partial | Present, but **tap-to-switch only — spec requires horizontal swipe.** |
+| Three modes PHOTO/VIDEO/LIVE | ✅ Real | Tap or horizontal swipe (spec requirement); locked during capture. |
 | Venue Intelligence | ✅ Real | New `VenueIntelligence`: GPS → offline pack → **computed** confidence. Was a hardcoded "Confidence: 99%". |
 | Low-confidence fallback (Nearby/Search/Skip) | ⚠️ Partial | Nearby + Skip implemented; **venue search not built.** |
 | Publish Settings (visibility/destination/venue) | ✅ Real | **Was a privacy bug** — settings were collected then discarded; "Private" posted publicly. Now enforced. |
@@ -127,7 +127,7 @@ Audited against the supplied spec. "Real" = actually functional, not a UI shell.
 | Performance targets (250 ms, 60 FPS) | ❓ Unverified | Never profiled — nothing has been run. |
 | Creator Tools | ❌ Missing | None of the 8 items exist. |
 
-**Net:** roughly 6 of ~20 spec subsystems are genuinely implemented. The camera
+**Net:** roughly 7 of ~20 spec subsystems are genuinely implemented. The camera
 now *captures and publishes correctly*, which it did not before, but the
 differentiating engines (Sound Aware, Dual Shot, AI processing, Offline queue)
 are still absent.

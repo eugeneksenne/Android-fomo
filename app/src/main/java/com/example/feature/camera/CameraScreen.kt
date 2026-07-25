@@ -16,6 +16,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -1030,13 +1031,28 @@ fun CameraScreen(
                 .padding(bottom = 54.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Horizontal Mode Swipe Selector (PHOTO, VIDEO, LIVE)
+            // Horizontal Mode Selector (PHOTO, VIDEO, LIVE).
+            // The spec requires swiping horizontally to switch modes; only
+            // tapping was wired up before.
+            val modes = listOf("PHOTO", "VIDEO", "LIVE")
             Row(
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 20.dp)
+                modifier = Modifier
+                    .padding(bottom = 20.dp)
+                    .pointerInput(isRecordingVideo, isBroadcasting) {
+                        detectHorizontalDragGestures { _, dragAmount ->
+                            // Mode changes are unsafe mid-capture.
+                            if (isRecordingVideo || isBroadcasting) return@detectHorizontalDragGestures
+                            if (kotlin.math.abs(dragAmount) < 12f) return@detectHorizontalDragGestures
+                            val index = modes.indexOf(selectedMode)
+                            // Drag left -> advance, drag right -> go back.
+                            val next = if (dragAmount < 0) index + 1 else index - 1
+                            if (next in modes.indices) selectedMode = modes[next]
+                        }
+                    }
             ) {
-                listOf("PHOTO", "VIDEO", "LIVE").forEach { mode ->
+                modes.forEach { mode ->
                     val isSelected = selectedMode == mode
                     Box(
                         modifier = Modifier
