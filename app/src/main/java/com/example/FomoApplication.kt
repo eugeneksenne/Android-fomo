@@ -5,6 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import android.util.Log
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 
@@ -29,13 +34,41 @@ import com.google.firebase.FirebaseOptions
  * If neither is available the app still starts; every Firebase-backed repository
  * degrades to local seed data rather than crashing.
  */
-class FomoApplication : Application() {
+class FomoApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
         initialiseFirebase()
         createNotificationChannels()
     }
+
+    /**
+     * Application-wide Coil loader.
+     *
+     * [VideoFrameDecoder] must be registered explicitly — Coil 2.x cannot read
+     * video at all without it, so every clip thumbnail (gallery button, publish
+     * preview, replay library) silently rendered blank.
+     *
+     * Also sets a disk cache so remote feed avatars are not refetched on every
+     * scroll, and enables hardware bitmaps for lower memory pressure.
+     */
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .components { add(VideoFrameDecoder.Factory()) }
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.20)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(120L * 1024 * 1024)
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .crossfade(true)
+            .build()
 
     private fun initialiseFirebase() {
         // The Google Services plugin auto-initialises Firebase when

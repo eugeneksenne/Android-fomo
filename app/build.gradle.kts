@@ -217,6 +217,9 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
+  // Decodes a frame from local video Uris. Without this artifact Coil cannot
+  // read video at all and every clip thumbnail renders blank.
+  implementation(libs.coil.video)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Uncomment to use Firestore:

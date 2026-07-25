@@ -162,6 +162,18 @@ Bugs that static feature-completeness checks miss but that break on real hardwar
 | **Uploads died with the screen** | Publishing ran in the Composable's `coroutineScope`; backgrounding the app or losing signal abandoned the moment permanently. | `MediaUploadWorker` (WorkManager) with exponential backoff, unique-work de-duplication, and the spec's Wi-Fi-only / charging-only policies. Permanent vs. transient failures are distinguished so retries aren't wasted. |
 | **Missing R8 keep rules** | Media3 Transformer resolves codecs and GL processors reflectively; WorkManager instantiates workers by class name. Both would fail **only in release builds**. | Keep rules added for Media3, WorkManager and ExifInterface. |
 
+
+### Lifecycle & durability pass (fourth review)
+
+| Issue | Impact | Fix |
+|---|---|---|
+| **Video thumbnails never rendered** | A code comment claimed "Coil renders a frame from a local video Uri". That is false for Coil 2.x — `coil-video` is a separate artifact and `VideoFrameDecoder` must be registered. Every clip thumbnail (gallery button, publish preview) was **blank**. | Added `coil-video`; registered `VideoFrameDecoder` in an app-wide `ImageLoaderFactory`, with a disk cache so feed avatars aren't refetched on every scroll. |
+| **Screen slept mid-recording** | Filming a long set, the display timed out; that pauses the preview and can finalise the recording. Footage lost. | `keepScreenOn` scoped to the camera screen, cleared on exit. |
+| **Backgrounding truncated the clip** | Taking a call or hitting recents abandoned the recording mid-write with no finalise. | `ON_PAUSE` stops recording cleanly so the muxer flushes and the normal replay flow runs; UI flags reset so the shutter isn't left stuck. |
+| **Release raced finalisation** | `release()` nulled `activeRecording` immediately after `stop()`, but finalisation is async — the reference could be collected before the file was written. | Reference is retained until `Finalize` confirms the file is on disk. |
+| **Recording until the disk filled** | No file-size cap. The muxer fails on a full volume and the entire clip is lost. | `setFileSizeLimit` with a 300 MB reserve (50 MB floor). CameraX finalises cleanly at the limit, keeping everything captured so far. |
+| **Timer drifted from the clip** | On-screen duration was a `delay(1000)` UI counter, which drifts against the media timeline on long recordings. | Polled from `VideoRecordEvent.Status.recordingStats` — the recorder's own clock. |
+
 ---
 
 ## 3. Remaining blockers before you can publish

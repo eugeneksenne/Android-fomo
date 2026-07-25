@@ -58,6 +58,11 @@ class CameraCaptureController(private val context: Context) {
     var isRecording: Boolean = false
         private set
 
+    /** Elapsed recording time reported by CameraX, in milliseconds. */
+    @Volatile
+    var recordedDurationMs: Long = 0L
+        private set
+
     /**
      * Device rotation tracker.
      *
@@ -292,6 +297,7 @@ class CameraCaptureController(private val context: Context) {
     fun startRecording(onFinalised: (Result<Uri>) -> Unit): Result<Unit> = runCatching {
         val video = videoCapture ?: error("Camera is not ready yet.")
         check(!isRecording) { "A recording is already in progress." }
+        recordedDurationMs = 0L
 
         val name = "FOMO_${timestamp()}"
         val values = ContentValues().apply {
@@ -302,9 +308,17 @@ class CameraCaptureController(private val context: Context) {
             }
         }
 
+        // Cap the file so a long recording cannot fill the device. CameraX
+        // finalises cleanly at the limit, preserving everything captured so
+        // far; without it recording continues until the disk is full and the
+        // muxer fails, losing the clip entirely.
+        val budget = availableBytes()
+        val limit = (budget - STORAGE_RESERVE_BYTES).coerceAtLeast(MIN_RECORDING_BYTES)
+
         val output = MediaStoreOutputOptions
             .Builder(context.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
             .setContentValues(values)
+            .setFileSizeLimit(limit)
             .build()
 
         var pending = video.output.prepareRecording(context, output)
@@ -315,6 +329,16 @@ class CameraCaptureController(private val context: Context) {
         activeRecording = pending.start(ContextCompat.getMainExecutor(context)) { event ->
             when (event) {
                 is VideoRecordEvent.Start -> isRecording = true
+
+                is VideoRecordEvent.Status -> {
+                    // Authoritative elapsed time straight from the recorder.
+                    // A UI-side `delay(1000)` counter drifts against the actual
+                    // media timeline, so the on-screen timer and the saved clip
+                    // disagreed on long recordings.
+                    recordedDurationMs =
+                        event.recordingStats.recordedDurationNanos / 1_000_000L
+                }
+
                 is VideoRecordEvent.Finalize -> {
                     isRecording = false
                     activeRecording = null
@@ -343,15 +367,41 @@ class CameraCaptureController(private val context: Context) {
         activeRecording = null
     }
 
+    /**
+     * Releases the camera.
+     *
+     * Recording is stopped but [activeRecording] is deliberately NOT nulled
+     * here: `stop()` is asynchronous and the file is only written when
+     * `VideoRecordEvent.Finalize` arrives. Clearing the reference eagerly (the
+     * previous behaviour) could let it be collected before finalisation,
+     * truncating or losing the clip when the user simply backgrounded the app.
+     * The Finalize handler clears it once the file is safely on disk.
+     *
+     * Unbinding is also deferred until any in-flight recording has stopped.
+     */
     fun release() {
+        runCatching { orientationListener.disable() }
+
+        val inFlight = activeRecording
+        if (inFlight != null) {
+            runCatching { inFlight.stop() }
+                .onFailure { Log.e(TAG, "Error stopping recording during release", it) }
+            // Leave `activeRecording` set; Finalize nulls it after the muxer
+            // has flushed.
+        }
+
         runCatching {
-            orientationListener.disable()
-            activeRecording?.stop()
-            activeRecording = null
-            isRecording = false
             camera = null
             cameraProvider?.unbindAll()
         }.onFailure { Log.e(TAG, "Error releasing camera", it) }
+    }
+
+    /** Free space on the volume MediaStore writes to. */
+    private fun availableBytes(): Long = try {
+        val stat = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+        stat.availableBlocksLong * stat.blockSizeLong
+    } catch (e: Exception) {
+        Long.MAX_VALUE
     }
 
     private fun hasPermission(permission: String): Boolean =
@@ -378,6 +428,12 @@ class CameraCaptureController(private val context: Context) {
     companion object {
         private const val TAG = "CameraCapture"
         private const val AUTO_CANCEL_SECONDS = 4L
+
+        /** Never consume the last 300 MB; leaves the device usable. */
+        private const val STORAGE_RESERVE_BYTES = 300L * 1024 * 1024
+
+        /** Floor so a nearly-full device still records something usable. */
+        private const val MIN_RECORDING_BYTES = 50L * 1024 * 1024
 
         val REQUIRED_PERMISSIONS: List<String> = listOf(Manifest.permission.CAMERA)
 

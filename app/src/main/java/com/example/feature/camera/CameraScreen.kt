@@ -51,6 +51,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -256,6 +260,43 @@ fun CameraScreen(
     val soundAware = remember { SoundAwareEngine(context) }
     val soundState by soundAware.state.collectAsState()
 
+    // STOP RECORDING CLEANLY WHEN THE APP IS BACKGROUNDED.
+    //
+    // Android may tear the camera down as soon as the app loses foreground (a
+    // call, the recents switcher, the power button). Previously the recording
+    // was simply abandoned mid-write. Finalising on ON_PAUSE means the footage
+    // captured so far is muxed and saved, and the normal end-of-recording flow
+    // (session marked ended, replay produced) still runs.
+    val lifecycleOwnerForCapture = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwnerForCapture) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE && cameraController.isRecording) {
+                cameraController.stopRecording()
+                // Mirror the state change in the UI. The Finalize callback
+                // handles the saved file, but these flags drive the shutter and
+                // the REC indicator, and would otherwise stay stuck on.
+                isRecordingVideo = false
+                isBroadcasting = false
+                isProcessing = true
+                processingStep = 1
+            }
+        }
+        lifecycleOwnerForCapture.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwnerForCapture.lifecycle.removeObserver(observer) }
+    }
+
+    // KEEP THE SCREEN AWAKE WHILE THE CAMERA IS OPEN.
+    //
+    // Without this the display sleeps on the normal system timeout. Because the
+    // screen turning off pauses the preview and can finalise an in-flight
+    // recording, a user filming a long set would silently lose their footage.
+    // The flag is scoped to this screen and cleared on exit.
+    val currentView = LocalView.current
+    DisposableEffect(currentView) {
+        currentView.keepScreenOn = true
+        onDispose { currentView.keepScreenOn = false }
+    }
+
     // MIC ARBITRATION.
     //
     // SoundAwareEngine opens AudioSource.MIC for beat detection. CameraX's
@@ -301,14 +342,19 @@ fun CameraScreen(
         }
     }
 
-    // Video Recording Timer
-    LaunchedEffect(isRecordingVideo) {
-        if (isRecordingVideo) {
-            videoDurationSeconds = 0
-            while (isRecordingVideo) {
-                delay(1000)
-                videoDurationSeconds++
+    // Recording timer, polled from CameraX's own recording stats.
+    //
+    // This used to be a `delay(1000)` counter incremented in the UI. Coroutine
+    // delays are not precise and drift against the media timeline, so on a long
+    // set the on-screen timer and the actual clip length disagreed noticeably.
+    LaunchedEffect(isRecordingVideo, isBroadcasting) {
+        if (isRecordingVideo || isBroadcasting) {
+            while (isRecordingVideo || isBroadcasting) {
+                videoDurationSeconds = (cameraController.recordedDurationMs / 1000L).toInt()
+                delay(250)
             }
+        } else {
+            videoDurationSeconds = 0
         }
     }
 
