@@ -159,8 +159,10 @@ are still absent.
    handling safety-critical live location. A Data Safety form is mandatory.
 10. **No real test coverage.** The suite is 4 repository tests plus `assertEquals(4, 2+2)`
     and a screenshot of `Greeting("Robolectric")` — a composable not used in the app.
-11. **Decide on Live.** Either build streaming infrastructure or remove/relabel the
-    LIVE mode. Advertising a broadcast that no one receives is misleading.
+11. **Decide on Live transport.** The local-first half (recording, readiness, crash
+    recovery, replay) is now real — see `docs/LIVE_ARCHITECTURE.md`. Transmission
+    is blocked on your RTMP/WebRTC decision; the UI no longer claims to be
+    broadcasting when it isn't.
 12. **`minSdk 24` + `enableOnBackInvokedCallback`** — verify predictive-back behaviour,
     and test on an API 24 device.
 

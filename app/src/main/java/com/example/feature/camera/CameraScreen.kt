@@ -3,6 +3,8 @@ package com.example.feature.camera
 import com.example.core.data.feed.FeedRepository
 import com.example.core.data.media.MediaUploader
 import com.example.core.data.venue.VenueIntelligence
+import com.example.feature.camera.live.LiveReadiness
+import com.example.feature.camera.live.LiveSessionStore
 import androidx.compose.runtime.collectAsState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -92,13 +94,17 @@ fun CameraScreen(
     var isCountdownActive by remember { mutableStateOf(false) }
     var countdownCount by remember { mutableStateOf(3) }
     var isBroadcasting by remember { mutableStateOf(false) }
-    var watcherCount by remember { mutableStateOf(2410) }
+    // Real viewer count. Starts at 0 and only moves when a streaming backend
+    // reports actual viewers; it was previously seeded to a fictional 2,410.
+    var watcherCount by remember { mutableStateOf(0) }
     val liveComments = remember { mutableStateListOf<String>() }
     var userCommentInput by remember { mutableStateOf("") }
     val floatingEmojis = remember { mutableStateListOf<FloatingEmoji>() }
+    // Polls start at zero. These were seeded to 142/84 votes despite there
+    // being no viewers able to cast one.
     var showLivePoll by remember { mutableStateOf(true) }
-    var pollVotesDJ1 by remember { mutableStateOf(142) }
-    var pollVotesDJ2 by remember { mutableStateOf(84) }
+    var pollVotesDJ1 by remember { mutableStateOf(0) }
+    var pollVotesDJ2 by remember { mutableStateOf(0) }
 
     // Video Capture States
     var isRecordingVideo by remember { mutableStateOf(false) }
@@ -119,6 +125,15 @@ fun CameraScreen(
         mutableStateOf<VenueIntelligence.VenueState>(VenueIntelligence.VenueState.Detecting)
     }
     var manualVenueName by remember { mutableStateOf<String?>(null) }
+
+    // ---- Live: readiness, local-first recording, crash recovery -----------
+    val liveSessionStore = remember { LiveSessionStore.getInstance(context) }
+    var readinessReport by remember { mutableStateOf<LiveReadiness.Report?>(null) }
+    var activeLiveSessionId by remember { mutableStateOf<String?>(null) }
+    var peakViewers by remember { mutableStateOf(0) }
+    var recoverableSession by remember {
+        mutableStateOf(liveSessionStore.findRecoverable())
+    }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -194,16 +209,17 @@ fun CameraScreen(
     // Screen Flash effect (Photo Capture trigger)
     var showFlashOverlay by remember { mutableStateOf(false) }
 
-    // SIMULATED: fabricated viewer count. There is no streaming backend, so no
-    // real audience exists. Showing an invented "2,410 watching" to a creator
-    // is fabricated social proof and must not ship as-is.
+    // Viewer count is intentionally NOT simulated.
+    //
+    // This previously ran `watcherCount += (-15..20).random()` on a timer and
+    // displayed an invented "2,410 watching" to the broadcaster. With no
+    // streaming transport there is no audience, so that was fabricated social
+    // proof shown to the creator about their own broadcast.
+    //
+    // `watcherCount` now stays at its real value (0) until a streaming backend
+    // reports actual viewers. See docs/LIVE_ARCHITECTURE.md.
     LaunchedEffect(isBroadcasting) {
-        if (isBroadcasting) {
-            while (isBroadcasting) {
-                delay(3000)
-                watcherCount += (-15..20).random()
-            }
-        }
+        if (isBroadcasting) peakViewers = maxOf(peakViewers, watcherCount)
     }
 
     // Sound Aware Engine: real on-device audio analysis. Previously this block
@@ -220,32 +236,19 @@ fun CameraScreen(
     // Null until enough onsets have been observed to be confident.
     val bpmValue: Int? = soundState.bpm
 
-    // SIMULATED: a fixed pool of fake comments replayed at random intervals to
-    // look like a live audience. Not connected to any chat backend.
-    val liveStreamComments = listOf(
-        "Amanda: This is absolutely crazy! 🔥",
-        "Tyler: What event is this? Amapiano Fridays?",
-        "Sarah: Best night ever, venue is packed!",
-        "Jason: Uncle Waffles is on fire! 🎧",
-        "Michael: Ripple multiplier is 2.5x right now!",
-        "Bongiwe: FOMO Club is undefeated.",
-        "Neo: Lit vibe, arriving in 10 mins!",
-        "Jessica: Bass shake effect looks gorgeous!",
-        "Lerato: That venue pill info has flash drops, go claim!",
-        "Kabelo: Show the DJ booth please!"
-    )
+    // Live comments are intentionally NOT simulated.
+    //
+    // A fixed pool of ten invented messages ("Amanda: This is absolutely
+    // crazy!", ...) used to be replayed at random 2.5-5 s intervals to imitate
+    // an audience. There is no chat backend, so every one of those was fake.
+    // Only genuine local events are shown now.
     LaunchedEffect(isBroadcasting) {
         if (isBroadcasting) {
             liveComments.clear()
             liveComments.add(
-                if (detectedVenueName.isNotBlank()) "System: Broadcast started at $detectedVenueName"
-                else "System: Broadcast started"
+                if (detectedVenueName.isNotBlank()) "Recording locally at $detectedVenueName"
+                else "Recording locally"
             )
-            while (isBroadcasting) {
-                delay((2500..5000).random().toLong())
-                val comment = liveStreamComments.random()
-                liveComments.add(comment)
-            }
         }
     }
 
@@ -1240,6 +1243,11 @@ fun CameraScreen(
                                             Toast.makeText(context, "Allow camera access to go live.", Toast.LENGTH_SHORT).show()
                                             return@clickable
                                         }
+                                        // Query the real device state before offering to broadcast.
+                                        readinessReport = LiveReadiness.evaluate(
+                                            context = context,
+                                            venueIdentified = detectedVenueName.isNotBlank()
+                                        )
                                         isLiveReadinessChecking = true
                                     }
                                 }
@@ -1352,7 +1360,15 @@ fun CameraScreen(
                                 .clip(CircleShape)
                                 .background(Color.White)
                         )
-                        Text("LIVE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        // "REC" not "LIVE": nothing is being transmitted to
+                        // viewers yet, so claiming LIVE would misrepresent the
+                        // broadcast state to the creator.
+                        Text(
+                            text = if (watcherCount > 0) "LIVE" else "REC",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -1365,7 +1381,15 @@ fun CameraScreen(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Icon(Icons.Default.People, null, tint = Color.White, modifier = Modifier.size(12.dp))
-                        Text("${watcherCount} WATCHING", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                        // Honest state: with no streaming transport wired up
+                        // there is no audience to count, so we say so rather
+                        // than displaying an invented figure.
+                        Text(
+                            text = if (watcherCount > 0) "$watcherCount WATCHING" else "REC · LOCAL",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp
+                        )
                     }
                 }
 
@@ -1574,6 +1598,63 @@ fun CameraScreen(
         }
 
         // -------------------------------------------------------------
+        // CRASH RECOVERY  ("Recovered Live Found" - spec requirement)
+        // A session left in RECORDING state means the process died mid-
+        // broadcast. Previously the recording was simply orphaned.
+        // -------------------------------------------------------------
+        recoverableSession?.let { session ->
+            AlertDialog(
+                onDismissRequest = { /* deliberate: force an explicit choice */ },
+                containerColor = Color(0xFF141414),
+                title = {
+                    Text(
+                        "Recovered Live found",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "FOMO closed unexpectedly during a Live" +
+                                (if (session.venueName.isNotBlank()) " at ${session.venueName}" else "") + ".",
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            "Recorded ${LiveReadiness.formatDuration(session.durationSeconds)} before the interruption.",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 11.sp
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        liveSessionStore.recover(session.id, session.localUri)
+                        session.localUri?.let { uri ->
+                            capturedMediaUri = android.net.Uri.parse(uri)
+                            capturedIsVideo = true
+                            capturedPhotoUrl = uri
+                            showPublishPreviewScreen = true
+                        }
+                        recoverableSession = null
+                    }) {
+                        Text("Recover", color = Color(0xFFFF2D55), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        liveSessionStore.delete(session.id)
+                        recoverableSession = null
+                    }) {
+                        Text("Delete", color = Color.White.copy(alpha = 0.6f))
+                    }
+                }
+            )
+        }
+
+        // -------------------------------------------------------------
         // PRE-LIVE DEVICE READINESS DIAGNOSTICS SCREEN
         // -------------------------------------------------------------
         if (isLiveReadinessChecking) {
@@ -1607,7 +1688,10 @@ fun CameraScreen(
 
                         Text("GO LIVE READINESS CHECK", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                         Text(
-                            text = "Verifying telemetry, video hardware encoder, and venue mapping anchors before streaming...",
+                            text = if (readinessReport?.canGoLive == false)
+                                "Some requirements aren't met yet."
+                            else
+                                "Checking camera, mic, network, GPS, storage, battery and temperature...",
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 11.sp,
                             textAlign = TextAlign.Center
@@ -1615,30 +1699,46 @@ fun CameraScreen(
 
                         Divider(color = Color.White.copy(alpha = 0.1f))
 
-                        // Diagnostics List Items
-                        val listItems = listOf(
-                            "GPS & Venue identified (Truth JHB)" to true,
-                            "Camera & Mic permissions verified" to true,
-                            "Network Latency (14 ms Jitter-free)" to true,
-                            "Local storage safe (24.2 GB / Est. 6h 15m)" to true,
-                            "Thermal temperature status (Cool)" to true
-                        )
-
+                        // Real device diagnostics. Every row used to be
+                        // hardcoded `to true`, so this dialog showed all-green
+                        // on a device with a full disk or no permissions.
                         Column(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            listItems.forEach { (label, ok) ->
+                            readinessReport?.checks?.forEach { check ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            check.label,
+                                            color = Color.White.copy(alpha = 0.85f),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            check.detail,
+                                            color = Color.White.copy(alpha = 0.5f),
+                                            fontSize = 9.sp,
+                                            lineHeight = 12.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = if (ok) Color(0xFF32C759) else Color.Red,
+                                        imageVector = when (check.severity) {
+                                            LiveReadiness.Severity.PASS -> Icons.Default.CheckCircle
+                                            LiveReadiness.Severity.WARN -> Icons.Default.Warning
+                                            LiveReadiness.Severity.BLOCK -> Icons.Default.Cancel
+                                        },
+                                        contentDescription = check.severity.name,
+                                        tint = when (check.severity) {
+                                            LiveReadiness.Severity.PASS -> Color(0xFF32C759)
+                                            LiveReadiness.Severity.WARN -> Color(0xFFFF9F43)
+                                            LiveReadiness.Severity.BLOCK -> Color(0xFFFF3B30)
+                                        },
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -1661,6 +1761,7 @@ fun CameraScreen(
                             }
 
                             Button(
+                                enabled = readinessReport?.canGoLive == true,
                                 onClick = {
                                     isLiveReadinessChecking = false
                                     isCountdownActive = true
@@ -1675,11 +1776,20 @@ fun CameraScreen(
 
                                         // Record the session for real so the
                                         // published replay is genuine footage.
+                                        // Local-first: register the session before
+                                        // recording so an unclean shutdown is
+                                        // detectable and recoverable next launch.
+                                        val sessionId = "live_${System.currentTimeMillis()}"
                                         val started = cameraController.startRecording { result ->
                                             result.fold(
                                                 onSuccess = { uri ->
                                                     isProcessing = false
                                                     processingStep = 0
+                                                    liveSessionStore.markEnded(sessionId, uri.toString(), peakViewers)
+                                                    // Keep the id so the publish
+                                                    // step can complete this
+                                                    // session's lifecycle.
+                                                    activeLiveSessionId = sessionId
                                                     capturedMediaUri = uri
                                                     capturedIsVideo = true
                                                     capturedPhotoUrl = uri.toString()
@@ -1690,6 +1800,8 @@ fun CameraScreen(
                                                     processingStep = 0
                                                     isBroadcasting = false
                                                     val msg = error.message ?: "Couldn't save the replay."
+                                                    liveSessionStore.markFailed(sessionId, msg)
+                                                    activeLiveSessionId = null
                                                     cameraError = msg
                                                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                                 }
@@ -1698,6 +1810,12 @@ fun CameraScreen(
                                         started.fold(
                                             onSuccess = {
                                                 isBroadcasting = true
+                                                peakViewers = 0
+                                                activeLiveSessionId = sessionId
+                                                liveSessionStore.startSession(
+                                                    id = sessionId,
+                                                    venueName = detectedVenueName
+                                                )
                                                 Toast.makeText(context, "Recording your live session.", Toast.LENGTH_SHORT).show()
                                             },
                                             onFailure = { error ->
@@ -2365,6 +2483,7 @@ fun CameraScreen(
                                     // (the previous behaviour) produced moments that
                                     // only rendered on the capturing device.
                                     publishStep = 2
+                                    activeLiveSessionId?.let { liveSessionStore.markUploading(it) }
                                     val upload = MediaUploader.uploadMoment(
                                         localUri = localUri,
                                         isVideo = capturedIsVideo,
@@ -2408,6 +2527,10 @@ fun CameraScreen(
                                                 destinations = destinations,
                                                 isVenueShared = isShareLocationEnabled
                                             )
+                                            activeLiveSessionId?.let {
+                                                liveSessionStore.markPublished(it, downloadUrl)
+                                                activeLiveSessionId = null
+                                            }
                                             isPublishing = false
                                             isUploadFinishedSuccess = true
                                         },
@@ -2416,6 +2539,9 @@ fun CameraScreen(
                                             publishStep = 0
                                             uploadProgress = 0f
                                             val msg = error.message ?: "Couldn't publish your moment."
+                                            // Keep it in the queue so the replay
+                                            // is never lost on a failed upload.
+                                            activeLiveSessionId?.let { liveSessionStore.markFailed(it, msg) }
                                             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                         }
                                     )
