@@ -45,7 +45,10 @@ object LookVideoProcessor {
     ): Uri {
         if (grade.isIdentity) return source
 
-        val output = File(context.cacheDir, "look_${System.currentTimeMillis()}.mp4")
+        // Graded clips are large; sweep stale ones before adding another.
+        LookProcessor.purgeStaleCache(context)
+
+        val output = File(context.cacheDir, "${LookProcessor.CACHE_PREFIX}${System.currentTimeMillis()}.mp4")
 
         return suspendCancellableCoroutine { cont ->
             val transformer = try {

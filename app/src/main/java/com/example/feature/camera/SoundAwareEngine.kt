@@ -76,6 +76,14 @@ class SoundAwareEngine(private val context: Context) {
 
     private var job: Job? = null
 
+    /**
+     * Held so [stop] can release the microphone synchronously. Cancelling the
+     * coroutine alone is asynchronous: the analysis loop may still own the mic
+     * when CameraX tries to claim it for recording, yielding a silent video.
+     */
+    @Volatile
+    private var recorder: AudioRecord? = null
+
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
@@ -100,7 +108,7 @@ class SoundAwareEngine(private val context: Context) {
             }
 
             val bufferSize = maxOf(minBuffer, FRAME_SAMPLES * 2)
-            val recorder = try {
+            val record = try {
                 AudioRecord(
                     MediaRecorder.AudioSource.MIC,
                     SAMPLE_RATE,
@@ -113,11 +121,12 @@ class SoundAwareEngine(private val context: Context) {
                 return@launch
             }
 
-            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
                 Log.w(TAG, "AudioRecord failed to initialise.")
-                runCatching { recorder.release() }
+                runCatching { record.release() }
                 return@launch
             }
+            recorder = record
 
             val buffer = ShortArray(FRAME_SAMPLES)
             val energyHistory = ArrayDeque<Float>(ENERGY_HISTORY)
@@ -125,11 +134,11 @@ class SoundAwareEngine(private val context: Context) {
             var lastBeatAt = 0L
 
             try {
-                recorder.startRecording()
+                record.startRecording()
                 _state.value = _state.value.copy(isListening = true)
 
                 while (isActive) {
-                    val read = recorder.read(buffer, 0, buffer.size)
+                    val read = record.read(buffer, 0, buffer.size)
                     if (read <= 0) continue
 
                     val rms = rms(buffer, read)
@@ -164,17 +173,29 @@ class SoundAwareEngine(private val context: Context) {
             } catch (e: Exception) {
                 Log.e(TAG, "Audio analysis stopped unexpectedly", e)
             } finally {
-                runCatching { recorder.stop() }
-                runCatching { recorder.release() }
+                releaseRecorder()
                 _state.value = SoundState()
             }
         }
     }
 
+    /**
+     * Stops analysis and releases the microphone immediately, so another
+     * client (CameraX) can take it without racing coroutine cancellation.
+     */
     fun stop() {
         job?.cancel()
         job = null
+        releaseRecorder()
         _state.value = SoundState()
+    }
+
+    @Synchronized
+    private fun releaseRecorder() {
+        val current = recorder ?: return
+        recorder = null
+        runCatching { if (current.recordingState == AudioRecord.RECORDSTATE_RECORDING) current.stop() }
+        runCatching { current.release() }
     }
 
     companion object {

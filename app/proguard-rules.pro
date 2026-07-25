@@ -145,3 +145,32 @@
 ##---------------------------------------------------------------------------
 -keep class com.google.firebase.storage.** { *; }
 -dontwarn com.google.firebase.storage.**
+
+##---------------------------------------------------------------------------
+## Media3 (ExoPlayer / Transformer / Effect)
+## Transformer resolves codecs, GL effect processors and renderer factories
+## reflectively. Stripping them makes Look baking fail only in release builds.
+##---------------------------------------------------------------------------
+-keep class androidx.media3.** { *; }
+-keep interface androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+-keepclassmembers class * implements androidx.media3.common.util.UnstableApi { *; }
+
+##---------------------------------------------------------------------------
+## WorkManager
+## Workers are instantiated by class name; obfuscating them yields
+## ClassNotFoundException when a queued upload is retried after a restart.
+##---------------------------------------------------------------------------
+-keep class * extends androidx.work.Worker { *; }
+-keep class * extends androidx.work.CoroutineWorker { *; }
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keep class androidx.work.impl.** { *; }
+-dontwarn androidx.work.**
+
+##---------------------------------------------------------------------------
+## AndroidX ExifInterface
+##---------------------------------------------------------------------------
+-keep class androidx.exifinterface.** { *; }
+-dontwarn androidx.exifinterface.**

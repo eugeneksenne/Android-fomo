@@ -147,6 +147,21 @@ are still absent.
 | No haptics | Felt unresponsive vs. flagship cameras. | Shutter, zoom and Look-selection haptics. |
 | Photos invisible in gallery | Files written without clearing `IS_PENDING`. | Published after save. |
 
+
+### Runtime-correctness pass (second review)
+
+Bugs that static feature-completeness checks miss but that break on real hardware:
+
+| Issue | Impact | Fix |
+|---|---|---|
+| **Microphone contention** | `SoundAwareEngine` held `AudioSource.MIC` continuously. CameraX's `withAudioEnabled()` needs the same input, and most devices allow one client — so **every recorded video was silent or failed outright**. The single worst regression introduced by adding Sound Aware. | Analysis pauses for the duration of any recording and resumes after. `stop()` now releases `AudioRecord` synchronously instead of relying on async coroutine cancellation, so CameraX can't lose the race. |
+| **OOM on flagship sensors** | `LookProcessor` decoded at full resolution then allocated a second ARGB_8888 copy: **400 MB for a 50 MP photo, 864 MB for 108 MP**, against a typical 192–512 MB heap. The Look filter crashed on exactly the phones it targets. | Bounds-only decode + power-of-two `inSampleSize` capping the long edge at 4096 px. Peak is now ~100 MB regardless of sensor. |
+| **Unbounded cache growth** | Every graded photo/video wrote a full-size intermediate to `cacheDir` that was never reclaimed — gigabytes over normal use. | 24 h TTL sweep before each write, scoped to this class's own `look_` files. |
+| **Double-tap shutter** | Rapid presses queued concurrent `takePicture()` calls racing to set state and opening the publish sheet repeatedly. | Shutter disabled while `isProcessing`. |
+| **Shutter deadlock** | If recording failed to *start*, `isProcessing` stayed `true` and the newly added guard left the button permanently disabled. | All failure paths reset capture state. |
+| **Uploads died with the screen** | Publishing ran in the Composable's `coroutineScope`; backgrounding the app or losing signal abandoned the moment permanently. | `MediaUploadWorker` (WorkManager) with exponential backoff, unique-work de-duplication, and the spec's Wi-Fi-only / charging-only policies. Permanent vs. transient failures are distinguished so retries aren't wasted. |
+| **Missing R8 keep rules** | Media3 Transformer resolves codecs and GL processors reflectively; WorkManager instantiates workers by class name. Both would fail **only in release builds**. | Keep rules added for Media3, WorkManager and ExifInterface. |
+
 ---
 
 ## 3. Remaining blockers before you can publish

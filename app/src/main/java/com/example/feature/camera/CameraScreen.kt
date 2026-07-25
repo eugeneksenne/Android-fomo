@@ -2,6 +2,7 @@ package com.example.feature.camera
 
 import com.example.core.data.feed.FeedRepository
 import com.example.core.data.media.MediaUploader
+import com.example.core.data.media.MediaUploadWorker
 import com.example.core.data.venue.VenueIntelligence
 import com.example.feature.camera.looks.FomoLook
 import com.example.feature.camera.looks.LookProcessor
@@ -255,8 +256,23 @@ fun CameraScreen(
     val soundAware = remember { SoundAwareEngine(context) }
     val soundState by soundAware.state.collectAsState()
 
-    DisposableEffect(Unit) {
-        soundAware.start(coroutineScope)
+    // MIC ARBITRATION.
+    //
+    // SoundAwareEngine opens AudioSource.MIC for beat detection. CameraX's
+    // Recorder needs that same input for withAudioEnabled(). On most devices
+    // only one client may hold the mic, so leaving the analyser running during
+    // a recording either fails the capture or produces a SILENT video.
+    //
+    // Analysis therefore pauses for the duration of any recording and resumes
+    // afterwards. Recording audio always wins - a missing BPM readout is
+    // cosmetic, a silent video is a lost moment.
+    val isCapturingAudio = isRecordingVideo || isBroadcasting
+    DisposableEffect(isCapturingAudio) {
+        if (isCapturingAudio) {
+            soundAware.stop()
+        } else {
+            soundAware.start(coroutineScope)
+        }
         onDispose { soundAware.stop() }
     }
 
@@ -1184,7 +1200,13 @@ fun CameraScreen(
                         .size(84.dp)
                         .clip(CircleShape)
                         .border(4.dp, Color.White, CircleShape)
-                        .clickable {
+                        .clickable(enabled = !isProcessing) {
+                            // Guard against double-taps. Without this, rapid
+                            // presses queued several concurrent takePicture()
+                            // calls, racing to set capturedMediaUri and firing
+                            // the publish sheet more than once.
+                            if (isProcessing) return@clickable
+
                             // Capture action handler
                             when (selectedMode) {
                                 "PHOTO" -> {
@@ -1285,6 +1307,13 @@ fun CameraScreen(
                                         started.fold(
                                             onSuccess = { isRecordingVideo = true },
                                             onFailure = { error ->
+                                                // Clear processing state too: the
+                                                // shutter is disabled while
+                                                // isProcessing is true, so leaving
+                                                // it set would lock the button.
+                                                isRecordingVideo = false
+                                                isProcessing = false
+                                                processingStep = 0
                                                 val msg = error.message ?: "Couldn't start recording."
                                                 cameraError = msg
                                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -1959,6 +1988,11 @@ fun CameraScreen(
                                                 Toast.makeText(context, "Recording your live session.", Toast.LENGTH_SHORT).show()
                                             },
                                             onFailure = { error ->
+                                                // Same guard as VIDEO: never leave
+                                                // the shutter disabled.
+                                                isBroadcasting = false
+                                                isProcessing = false
+                                                processingStep = 0
                                                 val msg = error.message ?: "Couldn't start the live session."
                                                 cameraError = msg
                                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -2678,11 +2712,24 @@ fun CameraScreen(
                                             isPublishing = false
                                             publishStep = 0
                                             uploadProgress = 0f
-                                            val msg = error.message ?: "Couldn't publish your moment."
-                                            // Keep it in the queue so the replay
-                                            // is never lost on a failed upload.
-                                            activeLiveSessionId?.let { liveSessionStore.markFailed(it, msg) }
-                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            // Hand off to WorkManager rather than
+                                            // dropping the capture. The inline
+                                            // upload dies with the Composable, so
+                                            // backgrounding the app or losing signal
+                                            // previously abandoned the moment
+                                            // permanently. WorkManager survives
+                                            // process death and retries with backoff.
+                                            MediaUploadWorker.enqueue(
+                                                context = context,
+                                                localUri = localUri,
+                                                isVideo = capturedIsVideo,
+                                                sessionId = activeLiveSessionId
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                "Upload interrupted - we'll finish it in the background.",
+                                                Toast.LENGTH_LONG
+                                            ).show()
                                         }
                                     )
                                 }
