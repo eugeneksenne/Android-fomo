@@ -3,6 +3,7 @@ package com.example.feature.camera
 import com.example.core.data.feed.FeedRepository
 import com.example.core.data.media.MediaUploader
 import com.example.core.data.venue.VenueIntelligence
+import androidx.compose.runtime.collectAsState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -84,7 +85,6 @@ fun CameraScreen(
     var selectedTemplate by remember { mutableStateOf("None") }
     var selectedEffect by remember { mutableStateOf("None") }
     var soundTheme by remember { mutableStateOf("Party") }
-    var bpmValue by remember { mutableStateOf(128) }
 
     // Live Streams States
     var isLiveReadinessChecking by remember { mutableStateOf(false) }
@@ -205,20 +205,19 @@ fun CameraScreen(
         }
     }
 
-    // SIMULATED: this is a random number in a plausible range, NOT real audio
-    // analysis. No microphone stream is sampled and no BPM is detected. The
-    // "SOUND AWARE: n BPM" HUD is therefore decorative. Either implement real
-    // onset detection (Visualizer / AudioRecord + FFT) or relabel the chip
-    // before launch - see docs/LAUNCH_READINESS.md.
-    LaunchedEffect(soundTheme) {
-        bpmValue = when (soundTheme) {
-            "Chill" -> (90..110).random()
-            "Party" -> (120..128).random()
-            "Festival" -> (128..135).random()
-            "Concert" -> (130..142).random()
-            else -> 128
-        }
+    // Sound Aware Engine: real on-device audio analysis. Previously this block
+    // assigned a random integer (e.g. (120..128).random()) and never opened the
+    // microphone, so the "SOUND AWARE: n BPM" readout was fabricated.
+    val soundAware = remember { SoundAwareEngine(context) }
+    val soundState by soundAware.state.collectAsState()
+
+    DisposableEffect(Unit) {
+        soundAware.start(coroutineScope)
+        onDispose { soundAware.stop() }
     }
+
+    // Null until enough onsets have been observed to be confident.
+    val bpmValue: Int? = soundState.bpm
 
     // SIMULATED: a fixed pool of fake comments replayed at random intervals to
     // look like a live audience. Not connected to any chat backend.
@@ -562,13 +561,26 @@ fun CameraScreen(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    Box(modifier = Modifier.weight(1f).fillMaxHeight(barHeight1).background(Color(0xFFFF2D55)))
-                    Box(modifier = Modifier.weight(1f).fillMaxHeight(barHeight2).background(Color(0xFF00FF7F)))
-                    Box(modifier = Modifier.weight(1f).fillMaxHeight(barHeight3).background(Color(0xFF00F0FF)))
+                    // Driven by real measured audio when the mic is live, so the
+                    // meter reflects the room instead of looping regardless of
+                    // whether any music is playing.
+                    val liveBar1 = if (soundState.isListening)
+                        (soundState.bassLevel * 6f).coerceIn(0.15f, 1f) else barHeight1
+                    val liveBar2 = if (soundState.isListening)
+                        (soundState.level * 5f).coerceIn(0.15f, 1f) else barHeight2
+                    val liveBar3 = if (soundState.isListening)
+                        (soundState.level * 3.5f).coerceIn(0.15f, 1f) else barHeight3
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(liveBar1).background(Color(0xFFFF2D55)))
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(liveBar2).background(Color(0xFF00FF7F)))
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(liveBar3).background(Color(0xFF00F0FF)))
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "SOUND AWARE: ${bpmValue} BPM",
+                    text = when {
+                        !soundState.isListening -> "SOUND AWARE: mic off"
+                        bpmValue == null -> "SOUND AWARE: listening..."
+                        else -> "SOUND AWARE: $bpmValue BPM"
+                    },
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold
@@ -1908,8 +1920,23 @@ fun CameraScreen(
                             Divider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 4.dp))
 
                             Text("AI Recommendation", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                            // Recommendation derived from what the mic actually
+                            // hears, rather than a fixed "128 BPM" string.
                             Text(
-                                "Heavy Amapiano Bass Detected (128 BPM). Suggested: Pulse Filter + Light Trails Effect.",
+                                text = when {
+                                    !soundState.isListening ->
+                                        "Enable microphone access to get music-matched Look suggestions."
+                                    bpmValue == null ->
+                                        "Listening for a beat..."
+                                    soundState.bassLevel > 0.12f ->
+                                        "Heavy bass detected ($bpmValue BPM). Suggested: Bass Shake + Pulse."
+                                    bpmValue >= 128 ->
+                                        "Fast tempo detected ($bpmValue BPM). Suggested: Strobe Sync + Neon."
+                                    bpmValue >= 100 ->
+                                        "Steady groove detected ($bpmValue BPM). Suggested: Pulse + Light Trails."
+                                    else ->
+                                        "Relaxed tempo detected ($bpmValue BPM). Suggested: Glow + Bokeh."
+                                },
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 9.sp,
                                 lineHeight = 12.sp

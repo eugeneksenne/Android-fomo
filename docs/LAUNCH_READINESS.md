@@ -116,7 +116,7 @@ Audited against the supplied spec. "Real" = actually functional, not a UI shell.
 | Looks carousel placement | ⚠️ Deviates | Spec puts it full-width below capture; it is a 90dp column beside it. |
 | Creative Effects (11) | ⚠️ Preview-only | Same as Looks — not applied to output. |
 | Moment Templates (10) | ❌ Cosmetic | UI list only; no template is applied. |
-| Sound Aware Engine | ❌ Fake | **No audio is sampled.** BPM is `(120..128).random()`. No beat/bass/drop detection, no beat-reactive effects. |
+| Sound Aware Engine | ⚠️ Partial | **Now real**: `SoundAwareEngine` opens the mic and runs energy-based onset detection (median inter-onset → BPM), low-band bass energy and crowd-energy classification, all on-device. BPM was `(120..128).random()`. Beat events are emitted; **beat-reactive visual effects are not yet bound to them**, and applause/vocal-peak/drop detection need a classifier. |
 | Dual Shot Engine | ❌ Removed | Was a stock photo of an unrelated person. Real version needs CameraX concurrent camera (device-gated). |
 | AI Scene Recognition | ❌ Missing | No classifier. |
 | AI Moment Processing | ❌ Fake | The "best frame / stabilisation / noise reduction" steps are `delay()` calls. |
@@ -127,7 +127,7 @@ Audited against the supplied spec. "Real" = actually functional, not a UI shell.
 | Performance targets (250 ms, 60 FPS) | ❓ Unverified | Never profiled — nothing has been run. |
 | Creator Tools | ❌ Missing | None of the 8 items exist. |
 
-**Net:** roughly 4 of ~20 spec subsystems are genuinely implemented. The camera
+**Net:** roughly 6 of ~20 spec subsystems are genuinely implemented. The camera
 now *captures and publishes correctly*, which it did not before, but the
 differentiating engines (Sound Aware, Dual Shot, AI processing, Offline queue)
 are still absent.
