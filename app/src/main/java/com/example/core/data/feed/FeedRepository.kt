@@ -15,15 +15,67 @@ data class CommentItem(
     val time: String
 )
 
+/**
+ * A Moment Invitation: a *temporary* invitation to join the creator where they
+ * are right now. Per the spec this is not a venue information card - only its
+ * state changes as the invitation runs down.
+ *
+ * The previous model stored `initialHours`/`initialMinutes` and a mutable
+ * status string that nothing ever updated, so the card rendered a hardcoded
+ * "Available for 02:44:18" that never moved and a state that only changed via
+ * a debug button. Expiry is now an absolute timestamp, which is the only way a
+ * countdown can survive recomposition, backgrounding and process death.
+ */
 data class InvitationData(
     val venueName: String,
     val isVenueVerified: Boolean,
     val creatorName: String,
-    val initialHours: Int,
-    val initialMinutes: Int,
-    val venueClosedText: String = "Opens Friday 18:00",
-    var status: String = "ACTIVE" // ACTIVE, ENDED, CLOSED
-)
+    /** Wall-clock instant the invitation stops being active. */
+    val expiresAtMs: Long,
+    /** Set when the creator explicitly ends sharing before expiry. */
+    val endedEarlyAtMs: Long? = null,
+    /** Opening hours copy shown when the venue itself is closed. */
+    val venueClosedText: String = "",
+    /** True when venue intelligence reports the venue is currently shut. */
+    val isVenueClosed: Boolean = false,
+) {
+    /** Spec states 1-3, derived rather than stored so they cannot disagree. */
+    enum class State { ACTIVE, ENDED, VENUE_CLOSED }
+
+    fun stateAt(nowMs: Long = System.currentTimeMillis()): State = when {
+        isVenueClosed -> State.VENUE_CLOSED
+        endedEarlyAtMs != null -> State.ENDED
+        nowMs >= expiresAtMs -> State.ENDED
+        else -> State.ACTIVE
+    }
+
+    fun remainingMs(nowMs: Long = System.currentTimeMillis()): Long =
+        (expiresAtMs - nowMs).coerceAtLeast(0L)
+
+    /** "Until I Leave" invitations are modelled as a far-future expiry. */
+    val isOpenEnded: Boolean get() = expiresAtMs >= OPEN_ENDED_THRESHOLD_MS
+
+    companion object {
+        /** Durations the Camera offers when publishing an invitation. */
+        val DURATION_OPTIONS_MINUTES = listOf(15, 30, 60, 120)
+
+        /** Sentinel horizon representing "Until I Leave". */
+        const val OPEN_ENDED_THRESHOLD_MS = 1_000L * 60 * 60 * 24 * 365
+
+        fun expiryFor(durationMinutes: Int, nowMs: Long = System.currentTimeMillis()): Long =
+            nowMs + durationMinutes * 60_000L
+
+        /** Formats remaining time as MM:SS, or HH:MM:SS beyond an hour. */
+        fun formatRemaining(remainingMs: Long): String {
+            val total = remainingMs / 1000
+            val h = total / 3600
+            val m = (total % 3600) / 60
+            val sec = total % 60
+            return if (h > 0) String.format("%02d:%02d:%02d", h, m, sec)
+            else String.format("%02d:%02d", m, sec)
+        }
+    }
+}
 
 data class NightlifeStory(
     val id: String,
@@ -382,16 +434,29 @@ object FeedRepository {
         }
     }
     
-    fun setInvitationStatus(momentId: String, status: String) {
-        _state.update { currentState ->
-            val updatedMoments = currentState.moments.map { moment ->
-                if (moment.id == momentId && moment.invitation != null) {
-                    moment.copy(invitation = moment.invitation.copy(status = status))
-                } else moment
-            }
-            currentState.copy(moments = updatedMoments)
+    /**
+     * Ends an invitation early, per the spec's "creator manually ends sharing".
+     * State is derived from timestamps, so this records *when* rather than
+     * writing a status string that could contradict the clock.
+     */
+    fun endInvitation(momentId: String) {
+        _state.update { current ->
+            current.copy(
+                moments = current.moments.map { moment ->
+                    if (moment.id == momentId && moment.invitation != null &&
+                        moment.invitation.endedEarlyAtMs == null
+                    ) {
+                        moment.copy(
+                            invitation = moment.invitation.copy(
+                                endedEarlyAtMs = System.currentTimeMillis()
+                            )
+                        )
+                    } else moment
+                }
+            )
         }
     }
+
 
     fun markStorySeen(storyId: String) {
         _state.update { currentState ->
@@ -480,8 +545,7 @@ object FeedRepository {
                     venueName = "Cocoon Nightclub",
                     isVenueVerified = true,
                     creatorName = "Amanda",
-                    initialHours = 1,
-                    initialMinutes = 45
+                    expiresAtMs = InvitationData.expiryFor(durationMinutes = 105)
                 ),
                 momentumState = "Heating",
                 currentVelocity = 4.2f
@@ -533,9 +597,8 @@ object FeedRepository {
                     venueName = "Marble",
                     isVenueVerified = true,
                     creatorName = "Thabo",
-                    initialHours = 0,
-                    initialMinutes = 0,
-                    status = "ENDED"
+                    // Already expired -> renders State 2 (Invitation Ended).
+                    expiresAtMs = System.currentTimeMillis() - 60_000L
                 ),
                 momentumState = "Quiet",
                 currentVelocity = 0.1f

@@ -73,7 +73,12 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     var analyticsSheetMoment by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
     var showPresenceDialog by remember { mutableStateOf(false) }
     var isSearchOpen by remember { mutableStateOf(false) }
-    var presenceSelectedPrivacy by remember { mutableStateOf("PUBLIC") }
+    // Spec: Private is the default for "Who's Here". This was initialised to
+    // "PUBLIC" while the dialog told the user "DEFAULT IS PRIVATE", so tapping
+    // Share Presence without changing anything would have broadcast the user's
+    // real-time location at a venue publicly. The value must also match one of
+    // the options listed below or nothing appears selected.
+    var presenceSelectedPrivacy by remember { mutableStateOf("Private (Default)") }
     var showCreateMomentSheet by remember { mutableStateOf(false) }
 
     // -------------------------------------------------------------------------
@@ -128,13 +133,6 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     // Pager state synced to filtered moments size
     val pagerState = rememberPagerState(pageCount = { filteredMoments.size })
 
-    // Simulate global countdown clocks for all invitations
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1000L)
-        }
-    }
-
     // Base Scaffold
     Scaffold(
         modifier = Modifier
@@ -162,6 +160,7 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                         onCommentClick = { commentSheetMoment = moment },
                         onMoreClick = { moderationTarget = moment },
                         isActivePage = pagerState.currentPage == page,
+                        activeTab = feedState.activeTab,
                         isMuted = isFeedMuted,
                         onToggleMute = { isFeedMuted = !isFeedMuted },
                         onAnalyticsClick = { analyticsSheetMoment = moment },
@@ -837,6 +836,8 @@ fun MomentPlayerItem(
     onMoreClick: () -> Unit,
     /** True when this page is the one the user is looking at. */
     isActivePage: Boolean = true,
+    /** Drives the tab-specific context line (Nearby shows distance). */
+    activeTab: String = "For You",
     isMuted: Boolean = false,
     onToggleMute: () -> Unit = {}
 ) {
@@ -845,7 +846,21 @@ fun MomentPlayerItem(
     var isTranslated by remember { mutableStateOf(false) }
 
     // Invitation State Selector Cycle (Active, Ended, Closed)
-    var currentInviteState by remember { mutableStateOf(1) } // 1: Active, 2: Ended, 3: Closed
+    // Invitation state and countdown, derived from the invitation's absolute
+    // expiry. The card previously rendered a frozen "Available for 02:44:18"
+    // and only changed state via a debug button that shipped in the UI.
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(moment.invitation?.expiresAtMs) {
+        // Tick only while this invitation can still change state.
+        while (moment.invitation != null &&
+            moment.invitation!!.stateAt(nowMs) == InvitationData.State.ACTIVE
+        ) {
+            delay(1000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val inviteState = moment.invitation?.stateAt(nowMs) ?: InvitationData.State.ENDED
+    val remainingMs = moment.invitation?.remainingMs(nowMs) ?: 0L
 
     // Ripple click scale animation
     var isRippleWaveActive by remember { mutableStateOf(false) }
@@ -1136,12 +1151,58 @@ fun MomentPlayerItem(
                 }
             }
 
-            Text(
-                text = moment.timeAgo,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
+            // Context line. The spec defines a distinct form per tab:
+            //   For You / Following : "2h ago - Sandton"
+            //   Nearby              : "5m ago - 280m away"
+            //   Live                : "LIVE - 2.4K watching"
+            //   Replay              : "Replay - Ended 5m ago"
+            // Only `timeAgo` was rendered before, so location, distance and
+            // live viewer counts never appeared.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val type = moment.momentType.uppercase()
+                when {
+                    type == "LIVE" -> {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF2D55))
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = if (moment.liveViewers > 0)
+                                "LIVE • ${formatViewers(moment.liveViewers)} watching"
+                            else "LIVE",
+                            color = Color(0xFFFF2D55),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    type == "REPLAY" -> Text(
+                        text = "Replay • Ended ${moment.timeAgo}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    else -> Text(
+                        text = buildString {
+                            append(moment.timeAgo)
+                            // Nearby surfaces distance; other tabs the venue.
+                            val context = if (activeTab == "Nearby") moment.distanceText
+                                          else moment.locationName
+                            if (context.isNotBlank()) {
+                                append(" • ")
+                                append(context)
+                            }
+                        },
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
 
             // Caption supporting Translation toggle
             Column {
@@ -1218,29 +1279,14 @@ fun MomentPlayerItem(
                                 }
                             }
 
-                            // Interactive State switcher button inside HUD (For evaluation)
-                            Surface(
-                                color = Color.White.copy(alpha = 0.05f),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.clickable {
-                                    currentInviteState = if (currentInviteState == 3) 1 else currentInviteState + 1
-                                    Toast.makeText(context, "Evaluated State changed to State $currentInviteState", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Text(
-                                    "Invite State: $currentInviteState",
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 8.sp,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                )
-                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // State Renderings
-                        when (currentInviteState) {
-                            1 -> {
+                        // State Renderings, derived from the invitation's own
+                        // expiry rather than a debug counter.
+                        when (inviteState) {
+                            InvitationData.State.ACTIVE -> {
                                 // STATE 1: ACTIVE INVITATION
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF32D74B)))
@@ -1248,13 +1294,14 @@ fun MomentPlayerItem(
                                     Text("${inv.creatorName} is here now", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Text(
-                                    text = "Available for 02:44:18", // Countdown state
+                                    text = if (inv.isOpenEnded) "Available until they leave"
+                                           else "Available for ${InvitationData.formatRemaining(remainingMs)}",
                                     color = Color.White.copy(alpha = 0.6f),
                                     fontSize = 11.sp,
                                     modifier = Modifier.padding(start = 16.dp)
                                 )
                             }
-                            2 -> {
+                            InvitationData.State.ENDED -> {
                                 // STATE 2: INVITATION ENDED
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
@@ -1268,19 +1315,23 @@ fun MomentPlayerItem(
                                     modifier = Modifier.padding(start = 16.dp)
                                 )
                             }
-                            3 -> {
+                            InvitationData.State.VENUE_CLOSED -> {
                                 // STATE 3: VENUE CLOSED
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF2D55)))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Venue Closed", color = Color(0xFFFF2D55), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
-                                Text(
-                                    text = inv.venueClosedText,
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(start = 16.dp)
-                                )
+                                // Opening hours are optional; don't render an
+                                // empty line when venue intelligence has none.
+                                if (inv.venueClosedText.isNotBlank()) {
+                                    Text(
+                                        text = inv.venueClosedText,
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(start = 16.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -1321,6 +1372,13 @@ fun MomentPlayerItem(
             }
         }
     }
+}
+
+/** Formats a viewer count the way the spec shows it: 2400 -> "2.4K". */
+fun formatViewers(count: Int): String = when {
+    count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000f).replace(".0M", "M")
+    count >= 1_000 -> String.format("%.1fK", count / 1_000f).replace(".0K", "K")
+    else -> count.toString()
 }
 
 // -------------------------------------------------------------------------

@@ -211,6 +211,31 @@ Notes:
 - `ReportReason` is persisted by enum name, so a keep rule was added to stop R8
   obfuscating it and making historical reports unreadable.
 
+
+## 2e. Feed spec conformance (`FOMO Feed System`)
+
+| Spec area | Status | Notes |
+|---|---|---|
+| Four tabs (For You / Following / Nearby / Live) | ✅ Real | Live correctly filters to active broadcasts only. |
+| Full-screen media + right action rail | ✅ Real | |
+| **Moment Invitation — 3 states** | ✅ **Fixed** | Was driven by a **debug button shipping in the production UI** ("Invite State: N", cycling on tap). State now derives from an absolute expiry timestamp. |
+| **Invitation countdown** | ✅ **Fixed** | Was the hardcoded literal `"Available for 02:44:18"` — frozen forever. Now ticks from real expiry, and stops ticking once ended so it doesn't burn a coroutine. |
+| Invitation durations (15/30/60/120 min, Until I Leave) | ✅ Real | Modelled; "Until I Leave" as an open-ended expiry. |
+| Creator ends sharing early | ✅ Real | `endInvitation()` records *when*, so state can't contradict the clock. |
+| **Metadata context line** | ✅ **Fixed** | Only `timeAgo` rendered. Now tab-aware per spec: venue on For You/Following, distance on Nearby, `LIVE • 2.4K watching` on Live, `Replay • Ended …` on replays. |
+| **"Who's Here" privacy default** | ✅ **Fixed** | Defaulted to `"PUBLIC"` while the dialog told the user "DEFAULT IS PRIVATE". Tapping Share Presence without changing anything would have **broadcast the user's real-time venue location publicly**. Now defaults to Private, per spec. |
+| Ripple states (Idle→Viral) | ✅ Real | |
+| Verification badges | ✅ Real | |
+| Caption 3 lines + translation | ✅ Real | |
+| Friend Intelligence line | ⚠️ Static | Rendered from a stored string; not computed from real friend activity. |
+| Follow button hides once following | ⚠️ Partial | Toggles, but is not hidden for own content. |
+| Search (creators/venues/events/sounds/hashtags) | ⚠️ Partial | Filters loaded moments by text only. |
+| Feed ranking engine (FOMO Score) | ❌ Missing | Tabs filter; there is no ranking by velocity, watch completion, distance or trust. |
+| Watch completion / view telemetry | ❌ Missing | Nothing is measured, so ranking has no inputs. |
+| Creator analytics (14 metrics) | ❌ Cosmetic | Sheet exists; values are not real. |
+| Replay retention tiers (7/30/90/180 days) | ❌ Missing | No retention policy implemented. |
+| FlashList virtualization / preloading | ⚠️ Partial | `VerticalPager` virtualizes; no next-item preloading. |
+
 ---
 
 ## 3. Remaining blockers before you can publish
