@@ -15,14 +15,13 @@ rules_version = '2';
 // These rules are written to be restrictive by default: anything not explicitly
 // allowed below is denied.
 //
-// KNOWN CLIENT/RULES MISMATCH — see docs/LAUNCH_READINESS.md:
-// The current Android client reads the ENTIRE `conversations` collection with
-// `db.collection("conversations").addSnapshotListener { ... }` and client-side
-// seeds it. Under these rules that listener will only return conversations the
-// signed-in user is a member of, and seeding is denied. The client must be
-// updated to (a) write a `participants` array on each conversation and (b)
-// query with `.whereArrayContains("participants", uid)`. Seed data must move to
-// a trusted environment (Admin SDK script or Cloud Function).
+// CLIENT ALIGNMENT — resolved.
+// ChatRepository now writes a `participants` array (plus `createdBy`) on every
+// conversation and queries with
+// `.whereArrayContains("participants", currentUserId())`, which is what these
+// rules require. Client-side seeding is gated behind BuildConfig.DEBUG.
+// Production seed data must still be provisioned from a trusted environment
+// (Admin SDK script or Cloud Function).
 // ---------------------------------------------------------------------------
 
 service cloud.firestore {

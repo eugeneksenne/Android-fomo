@@ -174,6 +174,28 @@ Bugs that static feature-completeness checks miss but that break on real hardwar
 | **Recording until the disk filled** | No file-size cap. The muxer fails on a full volume and the entire clip is lost. | `setFileSizeLimit` with a 300 MB reserve (50 MB floor). CameraX finalises cleanly at the limit, keeping everything captured so far. |
 | **Timer drifted from the clip** | On-screen duration was a `delay(1000)` UI counter, which drifts against the media timeline on long recordings. | Polled from `VideoRecordEvent.Status.recordingStats` — the recorder's own clock. |
 
+
+## 2c. Chats screen audit
+
+| Issue | Impact | Fix |
+|---|---|---|
+| **Message ownership was globally broken** | Every client wrote `senderId = "me"`, and the UI decided ownership with `senderId == "me"`. The moment two people shared a conversation, **both saw every message as their own** — right-aligned, attributed to themselves. The single most severe defect found in the app. | `senderId` is the real Firebase uid; ownership resolves via `ChatRepository.isFromCurrentUser()`, with a legacy path for seed rows. |
+| **Offline messages were silently destroyed** | Reconnecting only *marked* the queue delivered and cleared it. Nothing was ever written to Firestore. The sender saw a delivered tick; **the message reached nobody.** | `flushOfflineQueue()` actually transmits on reconnect, confirms delivery per-message, and re-queues on failure. Nothing is dropped. |
+| **Offline state was a manual toggle** | A toolbar switch labelled "Simulate Offline Queue" was the only source of offline state. Real signal loss was undetectable. | New `ConnectivityObserver` (NetworkCallback + `NET_CAPABILITY_VALIDATED`, so captive portals count as offline) drives it. |
+| **Every message stamped `"10:08 PM"`** | A hardcoded string literal. A whole day of conversation displayed the same time. | Real locale-aware wall-clock time. |
+| **Read receipts were fabricated** | `isRead` was set `true` on send, so every message showed as read by the recipient instantly. Users treat this as a factual signal about another person. | Always `false` on send. |
+| **Client violated its own security rules** | Conversations carried no `participants` field and the client listened to the entire collection. `firestore.rules` grants access only when `uid in participants` — so deploying the rules would have **denied every read and write**, bricking chat. | Conversations now carry `participants` + `createdBy`; the listener uses `.whereArrayContains("participants", uid)`. |
+| Stale offline indicator | `remember { !isNetworkOnline }` snapshotted once at composition and never updated. | Derived from state on each recomposition. |
+
+### Tooling
+
+Added `tools/ktbalance.py` — a Kotlin-aware bracket checker handling string
+templates, nested templates, raw strings, char literals, backtick identifiers
+and nested comments. My previous ad-hoc regex counting produced false results
+on both counts (it reported imbalances in known-good files, and would have
+missed real ones). All 79 Kotlin files verified balanced. This is a lexical
+check only — **it is not a substitute for compiling.**
+
 ---
 
 ## 3. Remaining blockers before you can publish
