@@ -9,9 +9,15 @@ and what still blocks a public release.
 
 > **Note on verification:** this sandbox has no JDK, no Android SDK and no network
 > access to `dl.google.com` / `services.gradle.org` / Maven Central, so **nothing
-> here has been compiled or run.** All findings are from static review. The CI
-> workflow added at `.github/workflows/android.yml` is the mechanism that will
-> actually verify the build — treat its first green run as the real gate.
+> here has been compiled or run.** All findings are from static review.
+>
+> A CI workflow is provided at **`docs/ci/android-ci.yml`**. It could not be
+> committed to `.github/workflows/` because this session's GitHub token lacks the
+> `workflows` permission — **move it yourself** to activate it:
+> ```bash
+> mkdir -p .github/workflows && git mv docs/ci/android-ci.yml .github/workflows/android.yml
+> ```
+> Treat its first green run as the real verification gate.
 
 ---
 
