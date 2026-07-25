@@ -93,6 +93,7 @@ data class NightGuardState(
     val isSafetyCheckActive: Boolean = false,
     val safetyCheckRemainingMinutes: Int = 45,
     val safetyCheckContacts: List<String> = listOf("Sarah", "Kgomotso"),
+    val safetyCheckTargetTime: String = "",
     val showSafetyCheckPrompt: Boolean = false,
     val isEscalationActive: Boolean = false
 )
@@ -280,12 +281,13 @@ object NightGuardRepository {
     }
 
     // Safety Check Actions
-    fun scheduleSafetyCheck(minutes: Int, contacts: List<String>) {
+    fun scheduleSafetyCheck(minutes: Int, contacts: List<String>, targetTimeLabel: String = "") {
         _state.update { current ->
             current.copy(
                 isSafetyCheckActive = true,
                 safetyCheckRemainingMinutes = minutes,
                 safetyCheckContacts = contacts,
+                safetyCheckTargetTime = targetTimeLabel,
                 showSafetyCheckPrompt = false,
                 isEscalationActive = false
             )

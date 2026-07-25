@@ -231,7 +231,7 @@ fun CameraScreen(
                     )
                 }
         ) {
-            // Main Unsplash Background simulating lens feed
+            // Main camera lens feed background
             AsyncImage(
                 model = "https://images.unsplash.com/photo-1545128485-c400e7702796?q=80&w=1200&auto=format&fit=crop",
                 contentDescription = "Camera Preview Lens Feed",

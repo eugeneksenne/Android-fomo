@@ -2214,8 +2214,8 @@ fun LocationMapsSubSection(
     primaryColor: Color
 ) {
     val accuracyOptions = listOf("High", "Balanced", "Low Power")
-    val engines = listOf("FOMO Routing", "Google Maps", "Waze", "Apple Maps")
-    val styles = listOf("Classic", "Dark", "Satellite", "Hybrid")
+    val engines = listOf("OpenStreetMap (OSM)", "FOMO Routing (Overpass API)", "Waze", "Google Maps")
+    val styles = listOf("Dark Luxury", "Classic OSM", "Satellite", "Hybrid")
 
     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // Location Services

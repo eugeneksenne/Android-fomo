@@ -36,6 +36,59 @@ import com.example.core.data.NightGuardRepository
 import com.example.core.data.NightGuardState
 
 /**
+ * Utility function to calculate safety check minutes and description from a clock string (e.g. "20:00", "00:00") or raw minutes.
+ */
+fun calculateCustomSafetyCheckTime(input: String): Pair<Int, String>? {
+    val clean = input.trim()
+    if (clean.isEmpty()) return null
+
+    // Direct match for target clock time e.g. "20:00", "00:00", "23:45", "8:30"
+    val parts = clean.split(":", ".")
+    if (parts.size == 2) {
+        val hh = parts[0].toIntOrNull() ?: return null
+        val mm = parts[1].toIntOrNull() ?: return null
+        if (hh in 0..23 && mm in 0..59) {
+            val now = java.util.Calendar.getInstance()
+            val currentHour = now.get(java.util.Calendar.HOUR_OF_DAY)
+            val currentMinute = now.get(java.util.Calendar.MINUTE)
+            val currentTotalMins = currentHour * 60 + currentMinute
+            var targetTotalMins = hh * 60 + mm
+
+            if (targetTotalMins <= currentTotalMins) {
+                targetTotalMins += 24 * 60
+            }
+
+            val diffMins = targetTotalMins - currentTotalMins
+            val h = diffMins / 60
+            val m = diffMins % 60
+
+            val clockLabel = String.format("%02d:%02d", hh, mm)
+            val desc = when {
+                h > 0 && m > 0 -> "Target $clockLabel (${h}h ${m}m)"
+                h > 0 -> "Target $clockLabel (${h}h)"
+                else -> "Target $clockLabel (${m}m)"
+            }
+            return Pair(diffMins, desc)
+        }
+    }
+
+    // Check raw number of minutes (e.g. "45", "90", "120")
+    val rawMins = clean.toIntOrNull()
+    if (rawMins != null && rawMins in 1..1440) {
+        val h = rawMins / 60
+        val m = rawMins % 60
+        val desc = when {
+            h > 0 && m > 0 -> "${h}h ${m}m"
+            h > 0 -> "${h} Hour${if (h > 1) "s" else ""}"
+            else -> "$rawMins Minutes"
+        }
+        return Pair(rawMins, desc)
+    }
+
+    return null
+}
+
+/**
  * Schedule Safety Check Setup Modal
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,14 +100,16 @@ fun SafetyCheckInviteDialog(
     var selectedMinutes by remember { mutableIntStateOf(60) }
     var selectedDurationText by remember { mutableStateOf("1 Hour") }
     var selectedContacts by remember { mutableStateOf(setOf("Sarah", "Kgomotso")) }
-    var customMinutesInput by remember { mutableStateOf("") }
+    var customTimeInput by remember { mutableStateOf("") }
 
     val presetDurations = listOf(
-        Triple("15m", 15, "15 Minutes"),
-        Triple("30m", 30, "30 Minutes"),
-        Triple("1 Hour", 60, "1 Hour"),
-        Triple("2 Hours", 120, "2 Hours"),
-        Triple("Event End", 90, "After Event Ends")
+        Triple("15m", "15", "15 Minutes"),
+        Triple("30m", "30", "30 Minutes"),
+        Triple("1 Hour", "60", "1 Hour"),
+        Triple("20:00", "20:00", "Target 20:00"),
+        Triple("22:00", "22:00", "Target 22:00"),
+        Triple("00:00", "00:00", "Target 00:00"),
+        Triple("02:00", "02:00", "Target 02:00")
     )
 
     val companionList = listOf(
@@ -111,9 +166,9 @@ fun SafetyCheckInviteDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Select Interval
+                // Select Interval or Clock Target
                 Text(
-                    text = "Check-in Interval:",
+                    text = "Check-in Time / Interval:",
                     color = Color.White.copy(alpha = 0.8f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -124,8 +179,9 @@ fun SafetyCheckInviteDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(presetDurations) { (label, mins, desc) ->
-                        val isSel = selectedMinutes == mins
+                    items(presetDurations) { (label, rawVal, desc) ->
+                        val parsed = calculateCustomSafetyCheckTime(rawVal)
+                        val isSel = parsed != null && selectedMinutes == parsed.first && customTimeInput == rawVal
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = if (isSel) Color(0xFF5856D6) else Color(0xFF222038),
@@ -134,8 +190,11 @@ fun SafetyCheckInviteDialog(
                                 if (isSel) Color(0xFF7D7AFF) else Color(0xFF2C2A48)
                             ),
                             modifier = Modifier.clickable {
-                                selectedMinutes = mins
-                                selectedDurationText = desc
+                                customTimeInput = rawVal
+                                parsed?.let { (mins, text) ->
+                                    selectedMinutes = mins
+                                    selectedDurationText = text
+                                }
                             }
                         ) {
                             Text(
@@ -146,6 +205,60 @@ fun SafetyCheckInviteDialog(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                             )
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Custom Time Input Field (e.g., 20:00, 00:00, or raw minutes)
+                OutlinedTextField(
+                    value = customTimeInput,
+                    onValueChange = { input ->
+                        customTimeInput = input
+                        val calc = calculateCustomSafetyCheckTime(input)
+                        if (calc != null) {
+                            selectedMinutes = calc.first
+                            selectedDurationText = calc.second
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Custom Time (e.g. 20:00, 00:00 or minutes)", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp) },
+                    placeholder = { Text("e.g. 20:00 or 00:00", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.AccessTime, contentDescription = null, tint = Color(0xFF7D7AFF), modifier = Modifier.size(20.dp))
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7D7AFF),
+                        unfocusedBorderColor = Color(0xFF2C2A48),
+                        focusedContainerColor = Color(0xFF100E20),
+                        unfocusedContainerColor = Color(0xFF100E20),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp)
+                )
+
+                // Live Active Summary Chip
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF5856D6).copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF5856D6).copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF7D7AFF), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Safety Check Scheduled: $selectedDurationText",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
 
@@ -237,7 +350,9 @@ fun SafetyCheckInviteDialog(
                         text = "Schedule Safety Check ($selectedDurationText)",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

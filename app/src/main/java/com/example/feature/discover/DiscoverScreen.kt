@@ -280,6 +280,7 @@ fun DiscoverScreen(
 
 @Composable
 fun DiscoverTopBar(unreadCount: Int, onProfileClick: () -> Unit) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2241,12 +2242,7 @@ fun getPrefixedAttribute(attr: String): String {
 }
 
 fun openWebsite(url: String, context: android.content.Context) {
-    try {
-        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        Toast.makeText(context, "Could not open website", Toast.LENGTH_SHORT).show()
-    }
+    com.example.feature.website.openFomoWebsite(context, url)
 }
 
 fun openRoute(address: String, context: android.content.Context) {
@@ -4916,15 +4912,15 @@ fun FlashDropRouteDialog(
                     try {
                         val gmmIntentUri = Uri.parse("geo:0,0?q=${Uri.encode(drop.venueName)}")
                         val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
-                        mapIntent.setPackage("com.google.android.apps.maps")
                         context.startActivity(mapIntent)
                     } catch (e: Exception) {
-                        Toast.makeText(context, "Opening maps route to ${drop.venueName}...", Toast.LENGTH_SHORT).show()
+                        val osmUri = Uri.parse("https://www.openstreetmap.org/search?query=${Uri.encode(drop.venueName)}")
+                        context.startActivity(Intent(Intent.ACTION_VIEW, osmUri))
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Open Google Maps", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Open Map Directions", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -5938,15 +5934,15 @@ fun SmartPlaceRouteDialog(
                     try {
                         val gmmIntentUri = Uri.parse("geo:0,0?q=${Uri.encode("${venue.name} ${venue.address}")}")
                         val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
-                        mapIntent.setPackage("com.google.android.apps.maps")
                         context.startActivity(mapIntent)
                     } catch (e: Exception) {
-                        Toast.makeText(context, "Opening directions to ${venue.name}...", Toast.LENGTH_SHORT).show()
+                        val osmUri = Uri.parse("https://www.openstreetmap.org/search?query=${Uri.encode("${venue.name} ${venue.address}")}")
+                        context.startActivity(Intent(Intent.ACTION_VIEW, osmUri))
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Open Google Maps", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Open Map Directions", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

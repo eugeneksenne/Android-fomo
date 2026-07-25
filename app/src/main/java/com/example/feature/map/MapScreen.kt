@@ -117,6 +117,10 @@ fun MapScreen(
     var isProfileOpen by remember { mutableStateOf(false) }
     var isAddPlaceOpen by remember { mutableStateOf(false) }
 
+    // Universal Website Viewer Sheet States
+    var activeWebsiteUrl by remember { mutableStateOf<String?>(null) }
+    var activeWebsiteTitle by remember { mutableStateOf<String?>(null) }
+
     // Dynamic Top Bar city status cycle index
     var cityStatusIndex by remember { mutableStateOf(0) }
     val cityStatuses = listOf(
@@ -378,6 +382,64 @@ fun MapScreen(
                     }
                 }
 
+                function fetchOverpassPOIs(categoryName) {
+                    try {
+                        var bounds = map.getBounds();
+                        var s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
+                        var cat = (categoryName || 'Nightlife').toLowerCase();
+                        var amenityQuery = 'nightclub|bar|pub|restaurant|cafe|fast_food';
+                        if (cat.indexOf('night') !== -1 || cat.indexOf('club') !== -1) {
+                            amenityQuery = 'nightclub|bar|pub';
+                        } else if (cat.indexOf('food') !== -1 || cat.indexOf('din') !== -1) {
+                            amenityQuery = 'restaurant|fast_food|food_court';
+                        } else if (cat.indexOf('well') !== -1 || cat.indexOf('recov') !== -1) {
+                            amenityQuery = 'spa|gym|fitness_centre';
+                        }
+                        var query = '[out:json][timeout:15];node["amenity"~"' + amenityQuery + '"](' + s + ',' + w + ',' + n + ',' + e + ');out body 30;';
+                        var url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query);
+                        
+                        fetch(url)
+                          .then(function(res) { return res.json(); })
+                          .then(function(data) {
+                              if (data && data.elements) {
+                                  var added = 0;
+                                  data.elements.forEach(function(el) {
+                                      if (el.tags && el.tags.name) {
+                                          var osmId = 'osm_' + el.id;
+                                          if (!venueMarkers[osmId]) {
+                                              addVenueMarker(
+                                                  osmId,
+                                                  el.tags.name,
+                                                  el.lat,
+                                                  el.lon,
+                                                  categoryName || 'Nightlife',
+                                                  (el.tags.amenity || 'OSM POI').toUpperCase(),
+                                                  4.7,
+                                                  90,
+                                                  'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=200&auto=format&fit=crop',
+                                                  false, false, false, 0, false, true, false, false
+                                              );
+                                              added++;
+                                          }
+                                      }
+                                  });
+                                  if (window.AndroidBridge) {
+                                      window.AndroidBridge.onOverpassResult(added, categoryName || 'All');
+                                  }
+                              }
+                          })
+                          .catch(function(err) {
+                              if (window.AndroidBridge) {
+                                  window.AndroidBridge.onOverpassResult(0, categoryName || 'All');
+                              }
+                          });
+                    } catch(e) {
+                        if (window.AndroidBridge) {
+                            window.AndroidBridge.onOverpassResult(0, categoryName || 'All');
+                        }
+                    }
+                }
+
                 $venuesScriptBuilder
                 $friendsScriptBuilder
                 toggleHeatmap(true);
@@ -421,6 +483,17 @@ fun MapScreen(
                                 }
                             }
                         }
+
+                        @android.webkit.JavascriptInterface
+                        fun onOverpassResult(count: Int, category: String) {
+                            post {
+                                if (count > 0) {
+                                    Toast.makeText(context, "🌐 OSM Overpass API: Live added $count $category spots!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "🌐 OpenStreetMap Overpass API synced.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
                     }, "AndroidBridge")
                     loadDataWithBaseURL("https://openstreetmap.org", finalHtml, "text/html", "UTF-8", null)
                     webViewRef = this
@@ -460,7 +533,7 @@ fun MapScreen(
                     selectedCategory = selectedCategory,
                     onCategorySelected = { cat ->
                         selectedCategory = cat
-                        webViewRef?.evaluateJavascript("filterCategory('$cat');", null)
+                        webViewRef?.evaluateJavascript("filterCategory('$cat'); fetchOverpassPOIs('$cat');", null)
                     }
                 )
 
@@ -605,6 +678,22 @@ fun MapScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             
+            // Live Overpass API OSM POIs button
+            FloatingActionButton(
+                onClick = {
+                    Toast.makeText(context, "Querying OpenStreetMap Overpass API...", Toast.LENGTH_SHORT).show()
+                    webViewRef?.evaluateJavascript("fetchOverpassPOIs('$selectedCategory');", null)
+                },
+                containerColor = Color(0xFF0F1524),
+                contentColor = Color(0xFF76FF03),
+                modifier = Modifier
+                    .size(48.dp)
+                    .border(1.5.dp, Color(0xFF76FF03), CircleShape),
+                shape = CircleShape
+            ) {
+                Icon(Icons.Default.Public, contentDescription = "Query Overpass API OSM POIs", modifier = Modifier.size(22.dp))
+            }
+
             // Add Place or Event (➕) button
             FloatingActionButton(
                 onClick = { isAddPlaceOpen = true },
@@ -714,6 +803,15 @@ fun MapScreen(
         if (isProfileOpen) {
             UserProfileOverlayDialog(
                 onClose = { isProfileOpen = false }
+            )
+        }
+
+        // Universal In-App Website Viewer Sheet
+        activeWebsiteUrl?.let { webUrl ->
+            com.example.feature.website.FomoWebsiteViewerSheet(
+                url = webUrl,
+                initialTitle = activeWebsiteTitle,
+                onDismiss = { activeWebsiteUrl = null }
             )
         }
 
@@ -1289,11 +1387,7 @@ fun NearestVenueCard(
                                 if (catClean == "NIGHTLIFE" || catClean == "EVENTS") {
                                     onNavigateToLobby(venue.id)
                                 } else {
-                                    try {
-                                        uriHandler.openUri(venue.websiteUrl)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Opening Website for ${venue.name}...", Toast.LENGTH_SHORT).show()
-                                    }
+                                    com.example.feature.website.openFomoWebsite(context, venue.websiteUrl)
                                 }
                             },
                             color = Color(0xFF1E1430),
@@ -1541,11 +1635,7 @@ fun HorizontalVenueCard(
                                 if (catClean == "NIGHTLIFE" || catClean == "EVENTS") {
                                     onNavigateToLobby(venue.id)
                                 } else {
-                                    try {
-                                        uriHandler.openUri(venue.websiteUrl)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Opening Website for ${venue.name}...", Toast.LENGTH_SHORT).show()
-                                    }
+                                    com.example.feature.website.openFomoWebsite(context, venue.websiteUrl)
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF151D30)),
@@ -1694,11 +1784,7 @@ fun VenueDetailsPanel(
                         if (catClean == "NIGHTLIFE" || catClean == "EVENTS") {
                             onNavigateToLobby(venue.id)
                         } else {
-                            try {
-                                uriHandler.openUri(venue.websiteUrl)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Opening Website for ${venue.name}...", Toast.LENGTH_SHORT).show()
-                            }
+                            com.example.feature.website.openFomoWebsite(context, venue.websiteUrl)
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF151D30)),

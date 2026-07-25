@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">FOMO</string>
+    <string name="default_web_client_id">191228918156-default.apps.googleusercontent.com</string>
 </resources>

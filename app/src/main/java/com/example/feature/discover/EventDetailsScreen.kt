@@ -409,7 +409,12 @@ fun EventDetailsScreen(
                         .fillMaxWidth()
                         .height(180.dp)
                         .clickable {
-                            Toast.makeText(context, "Opening Waze / Google Maps for live directions...", Toast.LENGTH_SHORT).show()
+                            try {
+                                val uri = android.net.Uri.parse("https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=-26.147,28.043;-26.145,28.047")
+                                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Opening OpenStreetMap directions...", Toast.LENGTH_SHORT).show()
+                            }
                         }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {

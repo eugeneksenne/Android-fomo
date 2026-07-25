@@ -1221,6 +1221,22 @@ fun SafetyCheckPanel(
                             )
                         }
 
+                        if (state.safetyCheckTargetTime.isNotBlank()) {
+                            Surface(
+                                color = Color(0xFF32D74B).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Color(0xFF32D74B).copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "⏰ Target Check-In: ${state.safetyCheckTargetTime}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF32D74B),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+
                         Text(
                             text = "We will prompt you with a safety check-in when the countdown ends.",
                             fontSize = 12.sp,
@@ -1806,7 +1822,19 @@ fun CreateSafetyCheckDialog(
     onDismiss: () -> Unit,
     onSchedule: (Int, List<String>) -> Unit
 ) {
-    var durationMinutes by remember { mutableStateOf(30) }
+    var durationMinutes by remember { mutableIntStateOf(30) }
+    var durationText by remember { mutableStateOf("30 Minutes") }
+    var customTimeInput by remember { mutableStateOf("") }
+
+    val presets = listOf(
+        Triple("15m", "15", "15 Minutes"),
+        Triple("30m", "30", "30 Minutes"),
+        Triple("1 Hour", "60", "1 Hour"),
+        Triple("20:00", "20:00", "Target 20:00"),
+        Triple("22:00", "22:00", "Target 22:00"),
+        Triple("00:00", "00:00", "Target 00:00"),
+        Triple("02:00", "02:00", "Target 02:00")
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1815,7 +1843,7 @@ fun CreateSafetyCheckDialog(
                 onClick = { onSchedule(durationMinutes, listOf("Sarah", "Kgomotso")) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF32D74B))
             ) {
-                Text("Set Timer", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Set Safety Check", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1827,32 +1855,88 @@ fun CreateSafetyCheckDialog(
             Text("🛡 Schedule Safety Check", color = Color.White, fontWeight = FontWeight.Bold)
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Select Check-in Frequency:", color = Color.White, fontSize = 13.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Select Check-In Target Time or Interval:", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    val presets = listOf(15, 30, 60, 120)
-                    presets.forEach { mins ->
-                        val selected = durationMinutes == mins
+                    items(presets) { (label, rawVal, desc) ->
+                        val parsed = com.example.feature.chats.calculateCustomSafetyCheckTime(rawVal)
+                        val isSel = parsed != null && durationMinutes == parsed.first && customTimeInput == rawVal
                         Surface(
-                            color = if (selected) Color(0xFF32D74B) else Color(0xFF1E293B),
+                            color = if (isSel) Color(0xFF32D74B) else Color(0xFF1E293B),
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { durationMinutes = mins }
+                            border = BorderStroke(1.dp, if (isSel) Color(0xFF32D74B) else Color(0xFF2C3A50)),
+                            modifier = Modifier.clickable {
+                                customTimeInput = rawVal
+                                parsed?.let { (mins, text) ->
+                                    durationMinutes = mins
+                                    durationText = text
+                                }
+                            }
                         ) {
                             Text(
-                                text = "${mins}m",
-                                color = if (selected) Color.Black else Color.White,
+                                text = label,
+                                color = if (isSel) Color.Black else Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(vertical = 10.dp)
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                             )
                         }
+                    }
+                }
+
+                // Custom Time Input Box (e.g., 20:00, 00:00)
+                OutlinedTextField(
+                    value = customTimeInput,
+                    onValueChange = { input ->
+                        customTimeInput = input
+                        val calc = com.example.feature.chats.calculateCustomSafetyCheckTime(input)
+                        if (calc != null) {
+                            durationMinutes = calc.first
+                            durationText = calc.second
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Custom Time (e.g. 20:00, 00:00 or minutes)", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp) },
+                    placeholder = { Text("e.g. 20:00 or 00:00", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.AccessTime, contentDescription = null, tint = Color(0xFF32D74B), modifier = Modifier.size(20.dp))
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF32D74B),
+                        unfocusedBorderColor = Color(0xFF2C3A50),
+                        focusedContainerColor = Color(0xFF162032),
+                        unfocusedContainerColor = Color(0xFF162032),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Summary Badge
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF32D74B).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFF32D74B).copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF32D74B), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Check-In Scheduled: $durationText",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

@@ -1395,6 +1395,7 @@ fun VenueInformationSection(state: VenueProfileState) {
 
 @Composable
 fun InfoLabelRow(label: String, value: String, isLink: Boolean = false) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1406,7 +1407,9 @@ fun InfoLabelRow(label: String, value: String, isLink: Boolean = false) {
             color = if (isLink) MaterialTheme.colorScheme.primary else Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 12.sp,
-            modifier = Modifier.clickable(enabled = isLink) { }
+            modifier = Modifier.clickable(enabled = isLink) {
+                com.example.feature.website.openFomoWebsite(context, value)
+            }
         )
     }
 }
