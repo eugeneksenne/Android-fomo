@@ -207,7 +207,18 @@ fun MapScreen(
                 .leaflet-zoom-animated {
                     transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1);
                 }
-                .leaflet-control-attribution { display: none !important; }
+                /* OpenStreetMap attribution is legally required (ODbL + OSM tile
+                   usage policy). It must stay visible - only style it to fit
+                   the dark theme, never hide it. */
+                .leaflet-control-attribution {
+                    background: rgba(0, 0, 0, 0.55) !important;
+                    color: rgba(255, 255, 255, 0.65) !important;
+                    font-size: 9px !important;
+                    padding: 1px 5px !important;
+                }
+                .leaflet-control-attribution a {
+                    color: rgba(255, 255, 255, 0.85) !important;
+                }
                 
                 /* Glowing neon ring keyframes */
                 @keyframes neon-glow-hot {
@@ -229,11 +240,16 @@ fun MapScreen(
             <script>
                 var map = L.map('map', {
                     zoomControl: false,
-                    attributionControl: false
+                    // LICENSING: OpenStreetMap data is ODbL-licensed and the
+                    // tile usage policy REQUIRES visible attribution. Disabling
+                    // the attribution control (the previous behaviour) breaches
+                    // both the ODbL and the OSM Foundation tile usage policy.
+                    attributionControl: true
                 }).setView([-26.115, 28.055], 13);
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19
+                    maxZoom: 19,
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 }).addTo(map);
 
                 var venueMarkers = {};
@@ -458,7 +474,16 @@ fun MapScreen(
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        // SECURITY: this WebView exposes a @JavascriptInterface
+                        // bridge ("AndroidBridge") and loads Leaflet from a CDN.
+                        // Allowing mixed content would let an active network
+                        // attacker inject script over plain http and drive that
+                        // bridge. Block it.
+                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        allowFileAccessFromFileURLs = false
+                        allowUniversalAccessFromFileURLs = false
                     }
                     addJavascriptInterface(object {
                         @android.webkit.JavascriptInterface

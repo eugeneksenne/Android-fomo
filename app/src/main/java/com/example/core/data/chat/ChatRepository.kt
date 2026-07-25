@@ -192,7 +192,14 @@ object ChatRepository {
                     return@addSnapshotListener
                 }
                 if (snapshot.isEmpty) {
-                    seedFirestoreConversations(db)
+                    // Seeding demo content from the client is DEBUG-ONLY.
+                    // In production this would let any installed client write
+                    // fabricated conversations into the shared database (and is
+                    // denied by firebase/firestore.rules). Real seed data must be
+                    // provisioned via the Admin SDK or a Cloud Function.
+                    if (com.example.BuildConfig.DEBUG) {
+                        seedFirestoreConversations(db)
+                    }
                 } else {
                     val firestoreConvs = snapshot.documents.mapNotNull { doc ->
                         val id = doc.id

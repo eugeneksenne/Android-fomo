@@ -90,7 +90,11 @@ object FeedRepository {
                     return@addSnapshotListener
                 }
                 if (snapshot.isEmpty) {
-                    seedFirestoreMoments(db)
+                    // Seeding demo content from the client is DEBUG-ONLY.
+                    // See ChatRepository for rationale.
+                    if (com.example.BuildConfig.DEBUG) {
+                        seedFirestoreMoments(db)
+                    }
                 } else {
                     val firestoreMoments = snapshot.documents.mapNotNull { doc ->
                         val id = doc.id

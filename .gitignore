@@ -16,3 +16,14 @@
 local.properties
 .env
 debug.keystore
+
+# Gradle wrapper JAR must be committed - do not ignore it.
+!gradle/wrapper/gradle-wrapper.jar
+
+# Firebase config (contains project identifiers; provide via CI secret)
+google-services.json
+app/google-services.json
+
+# Release signing material - never commit
+*.jks
+*.keystore

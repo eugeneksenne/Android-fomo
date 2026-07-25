@@ -1,0 +1,228 @@
+rules_version = '2';
+
+// FOMO — Cloud Firestore Security Rules
+//
+// Deploy with:  firebase deploy --only firestore:rules
+//
+// ---------------------------------------------------------------------------
+// IMPORTANT — READ BEFORE LAUNCH
+// ---------------------------------------------------------------------------
+// A Firebase project with no rules file deployed runs in either "test mode"
+// (allow read, write: if true — the entire database is world-readable AND
+// world-writable by anyone with the API key, which ships inside the APK) or
+// locked mode (everything denied). Neither is acceptable for production.
+//
+// These rules are written to be restrictive by default: anything not explicitly
+// allowed below is denied.
+//
+// KNOWN CLIENT/RULES MISMATCH — see docs/LAUNCH_READINESS.md:
+// The current Android client reads the ENTIRE `conversations` collection with
+// `db.collection("conversations").addSnapshotListener { ... }` and client-side
+// seeds it. Under these rules that listener will only return conversations the
+// signed-in user is a member of, and seeding is denied. The client must be
+// updated to (a) write a `participants` array on each conversation and (b)
+// query with `.whereArrayContains("participants", uid)`. Seed data must move to
+// a trusted environment (Admin SDK script or Cloud Function).
+// ---------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Anonymous accounts get read access but may not publish content.
+    function isFullAccount() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isParticipant(convData) {
+      return isSignedIn()
+        && convData.keys().hasAny(['participants'])
+        && request.auth.uid in convData.participants;
+    }
+
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    // Reject documents larger than a sane size to limit abuse.
+    function reasonableSize() {
+      return request.resource.data.size() < 100;
+    }
+
+    // ---------- users ----------
+    // A user profile is publicly readable (needed to render avatars/handles in
+    // feeds and chats) but only writable by its owner.
+    match /users/{userId} {
+      allow get, list: if isSignedIn();
+      allow create: if isUser(userId) && reasonableSize();
+      allow update: if isUser(userId)
+                    && reasonableSize()
+                    // The client must not be able to grant itself privileges.
+                    && !request.resource.data.diff(resource.data)
+                          .affectedKeys()
+                          .hasAny(['role', 'isVerified', 'isAdmin', 'creatorTier', 'balance']);
+      allow delete: if isUser(userId);
+
+      // Private per-user subcollections.
+      match /private/{docId} {
+        allow read, write: if isUser(userId);
+      }
+    }
+
+    // ---------- conversations ----------
+    match /conversations/{conversationId} {
+      // Only members may read a conversation. `list` is additionally
+      // constrained by the query the client issues; the client MUST use
+      // .whereArrayContains("participants", uid) or the query is rejected.
+      allow get, list: if isParticipant(resource.data);
+
+      // The creator must include themselves in `participants`.
+      allow create: if isFullAccount()
+                    && request.auth.uid in request.resource.data.participants
+                    && reasonableSize();
+
+      // Members may update conversation metadata but cannot remove the owner
+      // or rewrite the creation record.
+      allow update: if isParticipant(resource.data)
+                    && isParticipant(request.resource.data)
+                    && unchanged('createdBy');
+
+      allow delete: if isSignedIn()
+                    && resource.data.get('createdBy', '') == request.auth.uid;
+
+      match /messages/{messageId} {
+        function parentConv() {
+          return get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+        }
+
+        allow get, list: if isParticipant(parentConv());
+
+        // A user may only send messages as themselves, into a conversation
+        // they belong to.
+        allow create: if isFullAccount()
+                      && isParticipant(parentConv())
+                      && request.resource.data.senderId == request.auth.uid
+                      && request.resource.data.content is string
+                      && request.resource.data.content.size() <= 5000;
+
+        // Messages are immutable except for read receipts / delivery flags.
+        allow update: if isParticipant(parentConv())
+                      && request.resource.data.diff(resource.data)
+                            .affectedKeys()
+                            .hasOnly(['isRead', 'isDelivered', 'reactions']);
+
+        allow delete: if isSignedIn()
+                      && resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    // ---------- moments (social feed) ----------
+    match /moments/{momentId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isFullAccount()
+                    && request.resource.data.authorId == request.auth.uid
+                    && reasonableSize();
+
+      // Authors may edit their own post. Everyone else may only change
+      // engagement counters (likes / ripples), never the content.
+      allow update: if isSignedIn() && (
+                      resource.data.get('authorId', '') == request.auth.uid
+                      || request.resource.data.diff(resource.data)
+                            .affectedKeys()
+                            .hasOnly(['likesCount', 'ripplesCount', 'commentsCount'])
+                    );
+
+      allow delete: if isSignedIn()
+                    && resource.data.get('authorId', '') == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow get, list: if isSignedIn();
+        allow create: if isFullAccount()
+                      && request.resource.data.authorId == request.auth.uid
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() <= 2000;
+        allow update, delete: if isSignedIn()
+                              && resource.data.authorId == request.auth.uid;
+      }
+
+      // One engagement document per user guarantees uniqueness of a like.
+      match /engagements/{userId} {
+        allow read: if isSignedIn();
+        allow write: if isUser(userId);
+      }
+    }
+
+    // ---------- stories (ephemeral, 24h) ----------
+    match /stories/{storyId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFullAccount()
+                    && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && (
+                      resource.data.get('authorId', '') == request.auth.uid
+                      || request.resource.data.diff(resource.data)
+                            .affectedKeys().hasOnly(['viewsCount', 'reactions'])
+                    );
+      allow delete: if isSignedIn()
+                    && resource.data.get('authorId', '') == request.auth.uid;
+
+      match /views/{viewerId} {
+        // Only the story author can see the full viewer list; a viewer may
+        // record their own view.
+        allow read: if isSignedIn() && (
+                      isUser(viewerId)
+                      || get(/databases/$(database)/documents/stories/$(storyId))
+                           .data.get('authorId', '') == request.auth.uid
+                    );
+        allow create, update: if isUser(viewerId);
+      }
+    }
+
+    // ---------- venues / events (server-owned catalogue) ----------
+    // Read-only to all clients. These are curated records; writes must come
+    // from the Admin SDK, a Cloud Function, or a Creator Studio backend.
+    match /venues/{venueId} {
+      allow get, list: if true;
+      allow write: if false;
+    }
+
+    match /events/{eventId} {
+      allow get, list: if true;
+      allow write: if false;
+    }
+
+    // ---------- creator studio ----------
+    // Revenue, staff and campaign data. Never world-readable.
+    match /creator_profiles/{ownerId} {
+      allow read, write: if isUser(ownerId);
+
+      match /{sub=**} {
+        allow read, write: if isUser(ownerId);
+      }
+    }
+
+    // ---------- night guard (safety-critical, highly sensitive) ----------
+    // Live location and check-in state. Readable only by the owner and the
+    // explicitly named guardians on the document.
+    match /night_guard/{userId} {
+      allow read: if isUser(userId)
+                  || (isSignedIn()
+                      && request.auth.uid in resource.data.get('guardians', []));
+      allow write: if isUser(userId);
+    }
+
+    // ---------- default deny ----------
+    // Anything not matched above is denied. Do not add a catch-all allow.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

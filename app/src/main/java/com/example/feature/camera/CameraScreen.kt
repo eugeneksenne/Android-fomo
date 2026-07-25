@@ -1,7 +1,10 @@
 package com.example.feature.camera
 
 import com.example.core.data.feed.FeedRepository
+import com.example.core.data.media.MediaUploader
 
+import android.net.Uri
+import androidx.camera.core.ImageCapture
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -9,7 +12,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -70,7 +72,6 @@ fun CameraScreen(
     var selectedLook by remember { mutableStateOf("Pulse") } // Pulse, Neon, Glow, Midnight, Stage, Electric
     var isStudioOpen by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf("Off") } // Off, On, Auto
-    var isDualShotEnabled by remember { mutableStateOf(false) }
     var zoomFactor by remember { mutableStateOf(1.0f) } // 0.5x, 1.0x, 2.0x, 5.0x
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var isGridEnabled by remember { mutableStateOf(false) }
@@ -99,12 +100,30 @@ fun CameraScreen(
     var isRecordingVideo by remember { mutableStateOf(false) }
     var videoDurationSeconds by remember { mutableStateOf(0) }
 
+    // Real CameraX pipeline (replaces the previous static-image simulation).
+    val cameraController = remember { CameraCaptureController(context) }
+    var isFrontCamera by remember { mutableStateOf(false) }
+    var hasCameraPermission by remember {
+        mutableStateOf(CameraCaptureController.hasCameraPermission(context))
+    }
+    var cameraError by remember { mutableStateOf<String?>(null) }
+    // Real signed-in identity, rather than a hardcoded stock portrait.
+    val currentUserAvatarUrl = remember {
+        runCatching {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.photoUrl?.toString()
+        }.getOrNull().orEmpty()
+    }
+    // Content Uri of the media actually captured on this device.
+    var capturedMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var capturedIsVideo by remember { mutableStateOf(false) }
+
     // Photo/Video Capture & Publish Pipeline
     var capturedPhotoUrl by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
     var processingStep by remember { mutableStateOf(0) }
     var isPublishing by remember { mutableStateOf(false) }
     var publishStep by remember { mutableStateOf(0) }
+    var uploadProgress by remember { mutableStateOf(0f) }
     var showPublishPreviewScreen by remember { mutableStateOf(false) }
     var captionText by remember { mutableStateOf("") }
     var selectedVisibility by remember { mutableStateOf("Public") }
@@ -112,13 +131,12 @@ fun CameraScreen(
     var isShareLocationEnabled by remember { mutableStateOf(true) }
     var isUploadFinishedSuccess by remember { mutableStateOf(false) }
 
-    // Drag-and-drop dual shot window state
-    var dualShotOffset by remember { mutableStateOf(Offset(30f, 150f)) }
-
     // Screen Flash effect (Photo Capture trigger)
     var showFlashOverlay by remember { mutableStateOf(false) }
 
-    // Simulate fluctuation of Watcher count
+    // SIMULATED: fabricated viewer count. There is no streaming backend, so no
+    // real audience exists. Showing an invented "2,410 watching" to a creator
+    // is fabricated social proof and must not ship as-is.
     LaunchedEffect(isBroadcasting) {
         if (isBroadcasting) {
             while (isBroadcasting) {
@@ -128,7 +146,11 @@ fun CameraScreen(
         }
     }
 
-    // Simulate fluctuation of BPM value based on Sound Aware theme
+    // SIMULATED: this is a random number in a plausible range, NOT real audio
+    // analysis. No microphone stream is sampled and no BPM is detected. The
+    // "SOUND AWARE: n BPM" HUD is therefore decorative. Either implement real
+    // onset detection (Visualizer / AudioRecord + FFT) or relabel the chip
+    // before launch - see docs/LAUNCH_READINESS.md.
     LaunchedEffect(soundTheme) {
         bpmValue = when (soundTheme) {
             "Chill" -> (90..110).random()
@@ -139,7 +161,8 @@ fun CameraScreen(
         }
     }
 
-    // Real-time Chat Feed Streams
+    // SIMULATED: a fixed pool of fake comments replayed at random intervals to
+    // look like a live audience. Not connected to any chat backend.
     val liveStreamComments = listOf(
         "Amanda: This is absolutely crazy! 🔥",
         "Tyler: What event is this? Amapiano Fridays?",
@@ -218,7 +241,7 @@ fun CameraScreen(
             .background(Color.Black)
     ) {
         // -------------------------------------------------------------
-        // CAMERA VIEWINDER (Simulated)
+        // CAMERA VIEWFINDER (live CameraX preview)
         // -------------------------------------------------------------
         Box(
             modifier = Modifier
@@ -231,11 +254,21 @@ fun CameraScreen(
                     )
                 }
         ) {
-            // Main camera lens feed background
-            AsyncImage(
-                model = "https://images.unsplash.com/photo-1545128485-c400e7702796?q=80&w=1200&auto=format&fit=crop",
-                contentDescription = "Camera Preview Lens Feed",
-                contentScale = ContentScale.Crop,
+            // Real camera feed. Zoom is applied as a preview transform; the
+            // look/effect overlays below composite on top of it.
+            CameraViewfinder(
+                controller = cameraController,
+                useFrontCamera = isFrontCamera,
+                flashMode = when (flashMode) {
+                    "On" -> ImageCapture.FLASH_MODE_ON
+                    "Auto" -> ImageCapture.FLASH_MODE_AUTO
+                    else -> ImageCapture.FLASH_MODE_OFF
+                },
+                onPermissionResult = { granted -> hasCameraPermission = granted },
+                onError = { message ->
+                    cameraError = message
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer(
@@ -378,40 +411,13 @@ fun CameraScreen(
                 }
             }
 
-            // DUAL SHOT SUB-PREVIEW (Selfie Bubble)
-            if (isDualShotEnabled) {
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(dualShotOffset.x.roundToInt(), dualShotOffset.y.roundToInt()) }
-                        .size(110.dp, 160.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(2.dp, Color.White, RoundedCornerShape(16.dp))
-                        .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                dualShotOffset += dragAmount
-                            }
-                        }
-                ) {
-                    // Draggable selfie camera preview Unsplash
-                    AsyncImage(
-                        model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=300&auto=format&fit=crop",
-                        contentDescription = "Dual Shot Selfie Bubble",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    // Mini label
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(6.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    ) {
-                        Text("CREATOR", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+            // NOTE: the "Dual Shot" picture-in-picture selfie bubble was removed.
+            // It rendered a stock Unsplash portrait of an unrelated person rather
+            // than a second camera feed. True simultaneous front+back capture
+            // requires CameraX concurrent-camera support, which is only available
+            // on a subset of devices and must be feature-detected via
+            // ProcessCameraProvider.availableConcurrentCameraInfos before being
+            // offered in the UI. Tracked in docs/LAUNCH_READINESS.md.
 
             // TAP TO FOCUS PULSE RING
             focusPoint?.let { point ->
@@ -505,6 +511,29 @@ fun CameraScreen(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
+            }
+
+            // CAMERA ERROR BANNER
+            // cameraError was previously assigned in six places but never
+            // rendered, so hardware failures were invisible once the Toast
+            // faded. Surface it persistently until the next successful action.
+            cameraError?.let { message ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 96.dp, start = 20.dp, end = 20.dp)
+                        .background(Color(0xFF7F1D1D).copy(alpha = 0.92f), RoundedCornerShape(12.dp))
+                        .clickable { cameraError = null }
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = message,
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
             // TOP SCRIM GRADIENT
@@ -808,11 +837,15 @@ fun CameraScreen(
             }
         }
 
-        // DUAL SHOT HUD TOGGLE
+        // FLIP CAMERA (front / back). Previously this icon only toggled the
+        // decorative "dual shot" overlay and never changed lens.
         IconButton(
             onClick = {
-                isDualShotEnabled = !isDualShotEnabled
-                Toast.makeText(context, if (isDualShotEnabled) "Dual Shot Enabled" else "Dual Shot Disabled", Toast.LENGTH_SHORT).show()
+                if (isRecordingVideo || isBroadcasting) {
+                    Toast.makeText(context, "Can't flip the camera while recording.", Toast.LENGTH_SHORT).show()
+                } else {
+                    isFrontCamera = !isFrontCamera
+                }
             },
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -823,8 +856,8 @@ fun CameraScreen(
         ) {
             Icon(
                 imageVector = Icons.Default.FlipCameraIos,
-                contentDescription = "Toggle Dual Shot",
-                tint = if (isDualShotEnabled) Color(0xFFFF2D55) else Color.White,
+                contentDescription = if (isFrontCamera) "Switch to rear camera" else "Switch to front camera",
+                tint = Color.White,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -932,68 +965,107 @@ fun CameraScreen(
                             // Capture action handler
                             when (selectedMode) {
                                 "PHOTO" -> {
+                                    if (!hasCameraPermission) {
+                                        Toast.makeText(context, "Allow camera access to capture a moment.", Toast.LENGTH_SHORT).show()
+                                        return@clickable
+                                    }
+                                    cameraError = null
                                     coroutineScope.launch {
                                         showFlashOverlay = true
                                         delay(100)
                                         showFlashOverlay = false
-                                        // Transition to AI Moment Engine processing
+
                                         isProcessing = true
                                         processingStep = 1
-                                        delay(800)
+
+                                        // Real capture to the device gallery.
+                                        val result = cameraController.capturePhoto()
                                         processingStep = 2
-                                        delay(800)
-                                        processingStep = 3
-                                        delay(800)
-                                        processingStep = 4
-                                        delay(600)
-                                        isProcessing = false
-                                        capturedPhotoUrl = "https://images.unsplash.com/photo-1545128485-c400e7702796?q=80&w=600&auto=format&fit=crop"
-                                        showPublishPreviewScreen = true
+
+                                        result.fold(
+                                            onSuccess = { uri ->
+                                                processingStep = 3
+                                                delay(250)
+                                                processingStep = 4
+                                                delay(200)
+                                                isProcessing = false
+                                                capturedMediaUri = uri
+                                                capturedIsVideo = false
+                                                capturedPhotoUrl = uri.toString()
+                                                showPublishPreviewScreen = true
+                                            },
+                                            onFailure = { error ->
+                                                isProcessing = false
+                                                processingStep = 0
+                                                val msg = error.message ?: "Couldn't capture the photo."
+                                                cameraError = msg
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        )
                                     }
                                 }
                                 "VIDEO" -> {
+                                    if (!hasCameraPermission) {
+                                        Toast.makeText(context, "Allow camera access to record video.", Toast.LENGTH_SHORT).show()
+                                        return@clickable
+                                    }
                                     if (isRecordingVideo) {
-                                        // Stop Recording
+                                        // Stop the real recording. The saved Uri is
+                                        // delivered asynchronously via the callback
+                                        // registered in startRecording().
                                         isRecordingVideo = false
                                         isProcessing = true
                                         processingStep = 1
-                                        coroutineScope.launch {
-                                            delay(700)
-                                            processingStep = 2
-                                            delay(700)
-                                            processingStep = 3
-                                            delay(700)
-                                            processingStep = 4
-                                            delay(500)
-                                            isProcessing = false
-                                            capturedPhotoUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600&auto=format&fit=crop"
-                                            showPublishPreviewScreen = true
-                                        }
+                                        cameraController.stopRecording()
                                     } else {
-                                        // Start Recording
-                                        isRecordingVideo = true
+                                        val started = cameraController.startRecording { result ->
+                                            result.fold(
+                                                onSuccess = { uri ->
+                                                    isProcessing = false
+                                                    processingStep = 0
+                                                    capturedMediaUri = uri
+                                                    capturedIsVideo = true
+                                                    capturedPhotoUrl = uri.toString()
+                                                    showPublishPreviewScreen = true
+                                                },
+                                                onFailure = { error ->
+                                                    isProcessing = false
+                                                    processingStep = 0
+                                                    isRecordingVideo = false
+                                                    val msg = error.message ?: "Couldn't save the video."
+                                                    cameraError = msg
+                                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                }
+                                            )
+                                        }
+                                        started.fold(
+                                            onSuccess = { isRecordingVideo = true },
+                                            onFailure = { error ->
+                                                val msg = error.message ?: "Couldn't start recording."
+                                                cameraError = msg
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        )
                                     }
                                 }
                                 "LIVE" -> {
+                                    // NOTE: real-time broadcast to viewers requires
+                                    // streaming infrastructure (RTMP/WebRTC ingest +
+                                    // CDN) that does not exist yet - see
+                                    // docs/LAUNCH_READINESS.md. What IS real here is
+                                    // the capture: the session is recorded on-device
+                                    // and published as a genuine replay rather than
+                                    // a hardcoded stock photo.
                                     if (isBroadcasting) {
-                                        // End Live Broadcast
                                         isBroadcasting = false
                                         isProcessing = true
                                         processingStep = 1
-                                        coroutineScope.launch {
-                                            delay(900)
-                                            processingStep = 2
-                                            delay(900)
-                                            processingStep = 3
-                                            delay(900)
-                                            processingStep = 4
-                                            delay(600)
-                                            isProcessing = false
-                                            capturedPhotoUrl = "https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=600&auto=format&fit=crop"
-                                            showPublishPreviewScreen = true
-                                        }
+                                        cameraController.stopRecording()
                                     } else {
-                                        // Trigger live checks setup
+                                        if (!hasCameraPermission) {
+                                            Toast.makeText(context, "Allow camera access to go live.", Toast.LENGTH_SHORT).show()
+                                            return@clickable
+                                        }
                                         isLiveReadinessChecking = true
                                     }
                                 }
@@ -1426,8 +1498,40 @@ fun CameraScreen(
                                         countdownCount = 1
                                         delay(1000)
                                         isCountdownActive = false
-                                        isBroadcasting = true
-                                        Toast.makeText(context, "Broadcast Live! One Sun. Billion Eyes.", Toast.LENGTH_SHORT).show()
+
+                                        // Record the session for real so the
+                                        // published replay is genuine footage.
+                                        val started = cameraController.startRecording { result ->
+                                            result.fold(
+                                                onSuccess = { uri ->
+                                                    isProcessing = false
+                                                    processingStep = 0
+                                                    capturedMediaUri = uri
+                                                    capturedIsVideo = true
+                                                    capturedPhotoUrl = uri.toString()
+                                                    showPublishPreviewScreen = true
+                                                },
+                                                onFailure = { error ->
+                                                    isProcessing = false
+                                                    processingStep = 0
+                                                    isBroadcasting = false
+                                                    val msg = error.message ?: "Couldn't save the replay."
+                                                    cameraError = msg
+                                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                }
+                                            )
+                                        }
+                                        started.fold(
+                                            onSuccess = {
+                                                isBroadcasting = true
+                                                Toast.makeText(context, "Recording your live session.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onFailure = { error ->
+                                                val msg = error.message ?: "Couldn't start the live session."
+                                                cameraError = msg
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        )
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2D55)),
@@ -1822,12 +1926,31 @@ fun CameraScreen(
                                 .clip(RoundedCornerShape(16.dp))
                                 .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
                         ) {
+                            // Coil renders a frame from a local video Uri as well
+                            // as a still image, so this works for both modes.
                             AsyncImage(
-                                model = capturedPhotoUrl,
-                                contentDescription = "Captured Media preview",
+                                model = capturedMediaUri ?: capturedPhotoUrl,
+                                contentDescription = if (capturedIsVideo) "Captured video preview" else "Captured photo preview",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
                             )
+                            if (capturedIsVideo) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.55f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
                             // Selected Look overlay representation
                             val previewLookTint = when (selectedLook) {
                                 "Pulse" -> Color(0xFFFF2D55).copy(alpha = 0.12f)
@@ -2040,34 +2163,58 @@ fun CameraScreen(
                         // Trigger Publish Action!
                         Button(
                             onClick = {
+                                val localUri = capturedMediaUri
+                                if (localUri == null) {
+                                    Toast.makeText(context, "Nothing captured to publish.", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
                                 isPublishing = true
                                 publishStep = 1
                                 coroutineScope.launch {
-                                    delay(700)
+                                    // Upload the real captured file to object
+                                    // storage. Publishing the local content:// Uri
+                                    // (the previous behaviour) produced moments that
+                                    // only rendered on the capturing device.
                                     publishStep = 2
-                                    delay(700)
-                                    publishStep = 3
-                                    delay(700)
-                                    publishStep = 4
-                                    delay(700)
-                                    isPublishing = false
-                                    isUploadFinishedSuccess = true
-
-                                    // Add Story & Moment dynamically to global state / Firestore so that it is FULL STACK and integrated!
-                                    val formattedCaption = if (captionText.isEmpty()) "Vibing at Truth Nightclub" else captionText
-                                    MyCircleRepository.addStory(
-                                        userName = "You",
-                                        mediaUrl = capturedPhotoUrl,
-                                        text = formattedCaption,
-                                        type = if (selectedMode == "LIVE") "Live" else "Story"
+                                    val upload = MediaUploader.uploadMoment(
+                                        localUri = localUri,
+                                        isVideo = capturedIsVideo,
+                                        onProgress = { fraction ->
+                                            uploadProgress = fraction
+                                            publishStep = if (fraction < 0.99f) 2 else 3
+                                        }
                                     )
-                                    FeedRepository.addMoment(
-                                        username = "You",
-                                        avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop",
-                                        momentType = if (selectedMode == "LIVE") "LIVE" else if (selectedMode == "REPLAY") "REPLAY" else "PHOTO",
-                                        mediaUrl = capturedPhotoUrl,
-                                        captionOriginal = formattedCaption,
-                                        locationName = "Truth Nightclub"
+
+                                    upload.fold(
+                                        onSuccess = { downloadUrl ->
+                                            publishStep = 4
+                                            val formattedCaption =
+                                                if (captionText.isEmpty()) "Vibing at Truth Nightclub" else captionText
+
+                                            MyCircleRepository.addStory(
+                                                userName = "You",
+                                                mediaUrl = downloadUrl,
+                                                text = formattedCaption,
+                                                type = if (selectedMode == "LIVE") "Live" else "Story"
+                                            )
+                                            FeedRepository.addMoment(
+                                                username = "You",
+                                                avatarUrl = currentUserAvatarUrl,
+                                                momentType = if (capturedIsVideo) "VIDEO" else "PHOTO",
+                                                mediaUrl = downloadUrl,
+                                                captionOriginal = formattedCaption,
+                                                locationName = "Truth Nightclub"
+                                            )
+                                            isPublishing = false
+                                            isUploadFinishedSuccess = true
+                                        },
+                                        onFailure = { error ->
+                                            isPublishing = false
+                                            publishStep = 0
+                                            uploadProgress = 0f
+                                            val msg = error.message ?: "Couldn't publish your moment."
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        }
                                     )
                                 }
                             },
@@ -2107,15 +2254,30 @@ fun CameraScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
-                        CircularProgressIndicator(
-                            color = Color(0xFFFF2D55),
-                            strokeWidth = 3.dp,
-                            modifier = Modifier.size(48.dp)
-                        )
+                        // Real upload progress reported by Firebase Storage.
+                        // Indeterminate until the first progress callback lands.
+                        if (uploadProgress > 0f) {
+                            CircularProgressIndicator(
+                                progress = { uploadProgress.coerceIn(0f, 1f) },
+                                color = Color(0xFFFF2D55),
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(48.dp)
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                color = Color(0xFFFF2D55),
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(48.dp)
+                            )
+                        }
 
                         Text("UPLOADING MOMENT...", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                         Text(
-                            text = "Every capture contributes to your local Ripple score!",
+                            text = if (uploadProgress > 0f) {
+                                "${(uploadProgress.coerceIn(0f, 1f) * 100).toInt()}% uploaded"
+                            } else {
+                                "Preparing your capture..."
+                            },
                             color = Color.White.copy(alpha = 0.5f),
                             fontSize = 11.sp,
                             textAlign = TextAlign.Center

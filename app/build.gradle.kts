@@ -22,43 +22,133 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // NOTE: Firebase / Google Sign-In configuration is NOT declared here.
+    // The Secrets Gradle plugin (configured below) reads every key from `.env`
+    // — falling back to `.env.example` — and generates the matching
+    // BuildConfig fields automatically:
+    //   FIREBASE_API_KEY, FIREBASE_APP_ID, FIREBASE_PROJECT_ID,
+    //   FIREBASE_STORAGE_BUCKET, GOOGLE_WEB_CLIENT_ID
+    // Declaring them manually here would produce duplicate-field compile errors.
+    // These values previously lived hardcoded in WelcomeAuthScreen.kt.
   }
 
+  // Release signing is driven entirely by environment variables so that no
+  // keystore or password is ever committed. When they are absent (local dev,
+  // CI pull-request builds) we simply don't register the config and Gradle
+  // produces an unsigned release artifact instead of failing configuration.
+  val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+  val keystoreFile = file(keystorePath)
+  val storePasswordEnv = System.getenv("STORE_PASSWORD")
+  val keyPasswordEnv = System.getenv("KEY_PASSWORD")
+  val hasReleaseSigning =
+    keystoreFile.exists() && !storePasswordEnv.isNullOrBlank() && !keyPasswordEnv.isNullOrBlank()
+
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+    if (hasReleaseSigning) {
+      create("release") {
+        storeFile = keystoreFile
+        storePassword = storePasswordEnv
+        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+        keyPassword = keyPasswordEnv
+      }
     }
   }
 
   buildTypes {
     release {
-      isCrunchPngs = false
-      isMinifyEnabled = false
+      // Shrink, obfuscate and strip unused resources for the Play Store build.
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.findByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      // Falls back to the standard auto-generated debug keystore. The previous
+      // config pointed at a `debug.keystore` that is git-ignored and absent,
+      // which broke `assembleDebug` on every fresh clone.
+      //
+      // NOTE: deliberately no applicationIdSuffix. Changing the debug package
+      // name would stop it matching the client entry in google-services.json
+      // (failing the Google Services plugin) and would invalidate the SHA-1
+      // fingerprint registered for Google Sign-In.
+      versionNameSuffix = "-debug"
+      isMinifyEnabled = false
+    }
   }
+
+  packaging {
+    resources {
+      excludes += setOf(
+        "/META-INF/{AL2.0,LGPL2.1}",
+        "/META-INF/DEPENDENCIES",
+        "/META-INF/LICENSE*",
+        "/META-INF/NOTICE*",
+        "META-INF/*.version",
+        "DebugProbesKt.bin",
+        "kotlin-tooling-metadata.json",
+      )
+    }
+  }
+
+  lint {
+    // Pre-existing warnings across this codebase have not been triaged yet, so
+    // lint reports rather than blocks. The genuinely dangerous checks below are
+    // escalated to hard errors so the specific security regressions fixed in
+    // this pass (permissive WebView SSL/JS, cleartext traffic, hardcoded
+    // credentials) cannot silently come back.
+    abortOnError = false
+    warningsAsErrors = false
+    checkReleaseBuilds = true
+    checkDependencies = true
+    htmlReport = true
+    sarifReport = true
+    error += setOf(
+      "AcceptsUserCertificates",
+      "CustomX509TrustManager",
+      "TrustAllX509TrustManager",
+      "UnsafeProtectedBroadcastReceiver",
+      "WebViewClientOnReceivedSslError",
+      "CleartextTraffic",
+      "HardcodedDebugMode",
+      "ExportedActivity",
+      "ExportedContentProvider",
+      "ExportedReceiver",
+      "ExportedService",
+    )
+    disable += setOf("GradleDependency", "ObsoleteLintCustomCheck")
+  }
+
+  dependenciesInfo {
+    // Keep the Play Store dependency blob out of the artifact for reproducibility.
+    includeInApk = false
+    includeInBundle = true
+  }
+
+  bundle {
+    language { enableSplit = false }
+  }
+  // AGP 9.x requires JDK 17. Java 11 targets no longer build.
   compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
   }
   buildFeatures {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      isReturnDefaultValues = true
+    }
+  }
 }
+
+// Keep the Kotlin JVM target in lockstep with compileOptions. Without this the
+// Kotlin and Java targets can diverge and the build fails with an
+// "Inconsistent JVM-target compatibility" error.
+kotlin { jvmToolchain(17) }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
@@ -77,12 +167,16 @@ dependencies {
   implementation(libs.firebase.analytics)
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.auth)
-  // implementation(libs.accompanist.permissions)
+  implementation(libs.firebase.storage)
+  implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  // implementation(libs.androidx.camera.camera2)
-  // implementation(libs.androidx.camera.core)
-  // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
+  // CameraX - the Camera screen captures real photos/video (was previously a
+  // static Unsplash image standing in for a viewfinder).
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
+  implementation(libs.androidx.camera.video)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -115,6 +209,8 @@ dependencies {
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
+  // Provides Task.await() for the Firebase Storage upload path.
+  implementation(libs.kotlinx.coroutines.play.services)
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)

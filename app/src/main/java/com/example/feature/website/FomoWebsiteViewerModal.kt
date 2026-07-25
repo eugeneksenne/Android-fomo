@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.http.SslError
-import android.os.Build
 import android.webkit.GeolocationPermissions
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
@@ -436,17 +435,19 @@ fun FomoWebsiteViewerSheet(
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
                                     databaseEnabled = true
-                                    javaScriptCanOpenWindowsAutomatically = true
-                                    setSupportMultipleWindows(true)
-                                    allowFileAccess = true
-                                    allowContentAccess = true
+                                    javaScriptCanOpenWindowsAutomatically = false
+                                    setSupportMultipleWindows(false)
+                                    // SECURITY: deny the remote page access to the
+                                    // app's private file storage and content providers.
+                                    allowFileAccess = false
+                                    allowContentAccess = false
                                     useWideViewPort = true
                                     loadWithOverviewMode = true
                                     builtInZoomControls = true
                                     displayZoomControls = false
-                                    if (Build.VERSION.SDK_INT >= 21) {
-                                        mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                                    }
+                                    // SECURITY: never silently downgrade to http on an
+                                    // https page. NEVER_ALLOW blocks mixed content.
+                                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                                 }
 
                                 webChromeClient = object : WebChromeClient() {
@@ -465,7 +466,13 @@ fun FomoWebsiteViewerSheet(
                                         origin: String?,
                                         callback: GeolocationPermissions.Callback?
                                     ) {
-                                        callback?.invoke(origin, true, false)
+                                        // SECURITY/PRIVACY: do not auto-grant precise
+                                        // location to arbitrary third-party web content.
+                                        // Granting silently (the previous behaviour) leaks
+                                        // the user's location to any page they open and
+                                        // breaches the Play Store user-data policy.
+                                        // Deny, and do not retain the decision.
+                                        callback?.invoke(origin, false, false)
                                     }
 
                                     override fun onShowFileChooser(
@@ -550,7 +557,29 @@ fun FomoWebsiteViewerSheet(
                                         handler: SslErrorHandler?,
                                         error: SslError?
                                     ) {
-                                        handler?.proceed()
+                                        // SECURITY: never call handler.proceed() on an SSL error.
+                                        // This viewer is documented as supporting payment
+                                        // gateways (Stripe/PayPal/PayFast/Ozow); silently
+                                        // accepting an invalid certificate makes every session
+                                        // trivially man-in-the-middleable and is an automatic
+                                        // Google Play rejection under the Device and Network
+                                        // Abuse policy.
+                                        handler?.cancel()
+                                        isLoading = false
+                                        isSecureSsl = false
+                                        hasError = true
+                                        errorMessage = when (error?.primaryError) {
+                                            SslError.SSL_EXPIRED ->
+                                                "This site's security certificate has expired."
+                                            SslError.SSL_IDMISMATCH ->
+                                                "This site's security certificate does not match its address."
+                                            SslError.SSL_UNTRUSTED ->
+                                                "This site's security certificate is not trusted."
+                                            SslError.SSL_DATE_INVALID ->
+                                                "This site's security certificate is not yet valid."
+                                            else ->
+                                                "A secure connection to this site could not be established."
+                                        } + " For your safety, the page was blocked."
                                     }
                                 }
 
