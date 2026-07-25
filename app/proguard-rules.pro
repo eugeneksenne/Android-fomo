@@ -174,3 +174,15 @@
 ##---------------------------------------------------------------------------
 -keep class androidx.exifinterface.** { *; }
 -dontwarn androidx.exifinterface.**
+
+##---------------------------------------------------------------------------
+## Moderation
+## ReportReason is persisted to Firestore by enum name; obfuscating it would
+## make historical reports unreadable in the moderation console.
+##---------------------------------------------------------------------------
+-keepclassmembers enum com.example.core.data.moderation.** {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+    **[] $VALUES;
+    public *;
+}

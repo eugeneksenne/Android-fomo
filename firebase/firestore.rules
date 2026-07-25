@@ -218,6 +218,18 @@ service cloud.firestore {
       allow write: if isUser(userId);
     }
 
+    // ---------- content reports (UGC moderation) ----------
+    // Any signed-in user may file a report. Nobody may read the queue from the
+    // client: reports contain the reporter's identity and must only be
+    // triaged from a trusted environment (Admin SDK / moderation console).
+    match /content_reports/{reportId} {
+      allow create: if isSignedIn()
+                    && request.resource.data.reporterId == request.auth.uid
+                    && request.resource.data.reason is string
+                    && request.resource.data.get('details', '').size() <= 2000;
+      allow read, update, delete: if false;
+    }
+
     // ---------- default deny ----------
     // Anything not matched above is denied. Do not add a catch-all allow.
     match /{document=**} {

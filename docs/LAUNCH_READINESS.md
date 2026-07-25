@@ -196,6 +196,21 @@ on both counts (it reported imbalances in known-good files, and would have
 missed real ones). All 79 Kotlin files verified balanced. This is a lexical
 check only — **it is not a substitute for compiling.**
 
+
+## 2d. Feed screen audit
+
+| Issue | Impact | Fix |
+|---|---|---|
+| **No moderation controls anywhere in the app** | Google Play's User Generated Content policy requires an in-app way to **report** objectionable content and **block** abusive users. There was no report, block, hide or mute affordance in the feed, chats or stories. This is one of the most common causes of outright Play rejection for social apps — the listing would very likely have been refused. | New `ModerationRepository` + `ModerationSheet`: report (9 categories), block, hide, optional block-on-report. Blocked authors and hidden posts are filtered from the feed immediately and the state persists across restarts. Reports write to a `content_reports` collection that is create-only from the client. |
+| **Video posts never played** | Every moment rendered through `AsyncImage`, including `VIDEO`, `LIVE` and `REPLAY` types — so video showed one frozen frame. In a vertical, video-first feed this is the core interaction. | New `FeedVideoPlayer` (Media3/ExoPlayer): autoplay, loop, only the visible page plays, muted by default with a per-post sound toggle, player released on page dispose so decoders don't leak. |
+| **Comments attributed to a fictional user** | `addComment` defaulted to author `"Me"` with a stock avatar, so every comment in a shared feed showed the same fake identity — the same class of bug found in chats. | Defaults resolve from the signed-in account. |
+
+Notes:
+- Reported content is hidden for the reporter **immediately**, without waiting
+  for review, which is what Play expects.
+- `ReportReason` is persisted by enum name, so a keep rule was added to stop R8
+  obfuscating it and making historical reports unreadable.
+
 ---
 
 ## 3. Remaining blockers before you can publish

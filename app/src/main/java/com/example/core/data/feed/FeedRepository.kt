@@ -190,6 +190,18 @@ object FeedRepository {
         }
     }
 
+    /** Display name of the signed-in user, or a neutral fallback. */
+    private fun currentUserName(): String =
+        runCatching {
+            val u = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+            u?.displayName?.takeIf { it.isNotBlank() } ?: u?.email?.substringBefore("@")
+        }.getOrNull() ?: "You"
+
+    private fun currentUserAvatar(): String =
+        runCatching {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.photoUrl?.toString()
+        }.getOrNull().orEmpty()
+
     fun addMoment(
         username: String,
         avatarUrl: String,
@@ -340,7 +352,19 @@ object FeedRepository {
         }
     }
 
-    fun addComment(momentId: String, text: String, author: String = "Me", avatar: String = "https://i.pravatar.cc/150?img=12") {
+    /**
+     * Adds a comment authored by the signed-in user.
+     *
+     * The author previously defaulted to the literal "Me" with a stock avatar,
+     * so every comment in a shared feed was attributed to the same fictional
+     * person regardless of who wrote it.
+     */
+    fun addComment(
+        momentId: String,
+        text: String,
+        author: String = currentUserName(),
+        avatar: String = currentUserAvatar(),
+    ) {
         _state.update { currentState ->
             val updatedMoments = currentState.moments.map { moment ->
                 if (moment.id == momentId) {

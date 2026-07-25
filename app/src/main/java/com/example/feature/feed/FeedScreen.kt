@@ -44,6 +44,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import com.example.core.data.feed.*
+import com.example.core.data.moderation.ModerationRepository
+import com.example.feature.moderation.ModerationSheet
 
 // -------------------------------------------------------------------------
 // COMPOSABLE SCREEN
@@ -62,6 +64,12 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     var searchQuery by remember { mutableStateOf("") }
     var feedFilterTag by remember { mutableStateOf<String?>(null) }
     var commentSheetMoment by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
+    // Report / block / hide target. Play's UGC policy requires these controls.
+    var moderationTarget by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
+    // Feed audio starts muted, matching every major short-form video app.
+    var isFeedMuted by remember { mutableStateOf(true) }
+    val moderation = remember { ModerationRepository.getInstance(context) }
+    val moderationState by moderation.state.collectAsState()
     var analyticsSheetMoment by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
     var showPresenceDialog by remember { mutableStateOf(false) }
     var isSearchOpen by remember { mutableStateOf(false) }
@@ -82,9 +90,15 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     // IN-MEMORY COMPREHENSIVE FEED DATASET
     // -------------------------------------------------------------------------
     val momentsList = feedState.moments
-    val filteredMoments by remember {
+    val filteredMoments by remember(moderationState) {
         derivedStateOf {
             momentsList.filter { moment ->
+                // Blocked authors and hidden posts must never render. Keyed on
+                // moderationState so blocking takes effect immediately.
+                val allowed = moment.id !in moderationState.hiddenMoments &&
+                    moderationState.blockedUsers.none { it.equals(moment.username, ignoreCase = true) }
+                if (!allowed) return@filter false
+
                 // Apply Search query & tag filter
                 val matchesSearch = if (searchQuery.isNotEmpty()) {
                     moment.username.contains(searchQuery, ignoreCase = true) ||
@@ -146,6 +160,10 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                         moment = moment,
                         onNavigateToLobby = onNavigateToLobby,
                         onCommentClick = { commentSheetMoment = moment },
+                        onMoreClick = { moderationTarget = moment },
+                        isActivePage = pagerState.currentPage == page,
+                        isMuted = isFeedMuted,
+                        onToggleMute = { isFeedMuted = !isFeedMuted },
                         onAnalyticsClick = { analyticsSheetMoment = moment },
                         onPresenceTrigger = { showPresenceDialog = true },
                         onFollowToggle = {
@@ -407,6 +425,45 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                         }
                     }
                 }
+            }
+
+            // -------------------------------------------------------------------------
+            // BOTTOM SHEET: REPORT / BLOCK / HIDE  (Play UGC policy requirement)
+            // -------------------------------------------------------------------------
+            moderationTarget?.let { target ->
+                ModerationSheet(
+                    authorName = target.username,
+                    onDismiss = { moderationTarget = null },
+                    onHide = {
+                        moderation.hideMoment(target.id)
+                        moderationTarget = null
+                        Toast.makeText(context, "Post hidden.", Toast.LENGTH_SHORT).show()
+                    },
+                    onBlock = {
+                        moderation.blockUser(target.username)
+                        moderationTarget = null
+                        Toast.makeText(
+                            context,
+                            "${target.username} blocked. You won't see their posts.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    onReport = { reason, details, alsoBlock ->
+                        moderation.reportMoment(
+                            momentId = target.id,
+                            authorId = target.username,
+                            reason = reason,
+                            details = details,
+                            alsoBlockAuthor = alsoBlock
+                        )
+                        moderationTarget = null
+                        Toast.makeText(
+                            context,
+                            "Thanks - we'll review this post.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
             }
 
             // -------------------------------------------------------------------------
@@ -776,7 +833,12 @@ fun MomentPlayerItem(
     onFollowToggle: () -> Unit,
     onLikeToggle: () -> Unit,
     onRippleClick: () -> Unit,
-    onSaveToggle: () -> Unit
+    onSaveToggle: () -> Unit,
+    onMoreClick: () -> Unit,
+    /** True when this page is the one the user is looking at. */
+    isActivePage: Boolean = true,
+    isMuted: Boolean = false,
+    onToggleMute: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -800,13 +862,26 @@ fun MomentPlayerItem(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // FULL-SCREEN VISUAL BACKGROUND
-        AsyncImage(
-            model = moment.mediaUrl,
-            contentDescription = "Moment Video/Photo Frame",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        // FULL-SCREEN MEDIA
+        //
+        // Video posts previously rendered through AsyncImage, so they showed a
+        // single frozen frame and never played - in a video-first vertical feed
+        // that is the core interaction.
+        if (isPlayableVideo(moment.momentType, moment.mediaUrl)) {
+            FeedVideoPlayer(
+                mediaUrl = moment.mediaUrl,
+                isActive = isActivePage,
+                isMuted = isMuted,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AsyncImage(
+                model = moment.mediaUrl,
+                contentDescription = "Moment photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // AMBIENT GRADIENT SHADOWS
         Box(
@@ -949,6 +1024,27 @@ fun MomentPlayerItem(
                 onClick = {
                     Toast.makeText(context, "Copied Moment link to clipboard!", Toast.LENGTH_SHORT).show()
                 }
+            )
+
+            // Mute toggle, only meaningful on video posts.
+            if (isPlayableVideo(moment.momentType, moment.mediaUrl)) {
+                ActionRailItem(
+                    icon = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff
+                           else Icons.AutoMirrored.Filled.VolumeUp,
+                    tint = Color.White,
+                    label = if (isMuted) "Muted" else "Sound",
+                    onClick = onToggleMute
+                )
+            }
+
+            // Report / block / hide. Required by the Google Play User
+            // Generated Content policy; the feed previously had no way at all
+            // to report a post or block an author.
+            ActionRailItem(
+                icon = Icons.Default.MoreHoriz,
+                tint = Color.White,
+                label = "More",
+                onClick = onMoreClick
             )
         }
 
