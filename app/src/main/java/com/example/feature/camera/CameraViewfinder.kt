@@ -5,6 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +29,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +55,10 @@ fun CameraViewfinder(
     modifier: Modifier = Modifier,
     onPermissionResult: (Boolean) -> Unit = {},
     onError: (String) -> Unit = {},
+    /** Emits the ratio actually applied after a pinch. */
+    onZoomChanged: (Float) -> Unit = {},
+    /** Emits tap coordinates within the preview, for the focus ring. */
+    onFocusTap: (Offset) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -101,7 +109,26 @@ fun CameraViewfinder(
 
     Box(modifier = modifier.background(Color.Black)) {
         if (hasPermission) {
-            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            AndroidView(
+                factory = { previewView },
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Pinch-to-zoom drives the real CameraControl zoom ratio.
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, gestureZoom, _ ->
+                            if (gestureZoom != 1f) {
+                                onZoomChanged(controller.scaleZoom(gestureZoom))
+                            }
+                        }
+                    }
+                    // Tap-to-focus runs real AF/AE metering at the tapped point.
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            controller.focusAt(previewView, offset.x, offset.y)
+                            onFocusTap(offset)
+                        }
+                    }
+            )
         } else {
             CameraPermissionPlaceholder(
                 permanentlyDenied = permissionRequested,

@@ -3,10 +3,14 @@ package com.example.feature.camera
 import com.example.core.data.feed.FeedRepository
 import com.example.core.data.media.MediaUploader
 import com.example.core.data.venue.VenueIntelligence
+import com.example.feature.camera.looks.FomoLook
+import com.example.feature.camera.looks.LookProcessor
+import com.example.feature.camera.looks.LookVideoProcessor
 import com.example.feature.camera.live.LiveReadiness
 import com.example.feature.camera.live.LiveSessionStore
 import androidx.compose.runtime.collectAsState
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 
 import android.net.Uri
@@ -45,6 +49,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -76,7 +82,12 @@ fun CameraScreen(
 
     // Navigation & Layout States
     var selectedMode by remember { mutableStateOf("PHOTO") } // PHOTO, VIDEO, LIVE
-    var selectedLook by remember { mutableStateOf("Pulse") } // Pulse, Neon, Glow, Midnight, Stage, Electric
+    var selectedLook by remember { mutableStateOf("Pulse") }
+    // Spec: "Long press adjusts intensity."
+    var lookIntensity by remember { mutableStateOf(1f) }
+    var showIntensitySlider by remember { mutableStateOf(false) }
+    val activeLook = remember(selectedLook) { FomoLook.fromDisplayName(selectedLook) }
+    val activeGrade = remember(activeLook, lookIntensity) { activeLook.scaled(lookIntensity) }
     var isStudioOpen by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf("Off") } // Off, On, Auto
     var zoomFactor by remember { mutableStateOf(1.0f) } // 0.5x, 1.0x, 2.0x, 5.0x
@@ -112,6 +123,7 @@ fun CameraScreen(
 
     // Real CameraX pipeline (replaces the previous static-image simulation).
     val cameraController = remember { CameraCaptureController(context) }
+    val haptics = LocalHapticFeedback.current
     var isFrontCamera by remember { mutableStateOf(false) }
     var hasCameraPermission by remember {
         mutableStateOf(CameraCaptureController.hasCameraPermission(context))
@@ -191,6 +203,21 @@ fun CameraScreen(
     // Content Uri of the media actually captured on this device.
     var capturedMediaUri by remember { mutableStateOf<Uri?>(null) }
     var capturedIsVideo by remember { mutableStateOf(false) }
+    // Thumbnail for the gallery button: the user's most recent capture.
+    var lastCaptureThumb by remember { mutableStateOf<Uri?>(null) }
+
+    // System photo picker - needs no storage permission on any API level.
+    val galleryPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { picked ->
+        if (picked != null) {
+            val mime = runCatching { context.contentResolver.getType(picked) }.getOrNull().orEmpty()
+            capturedMediaUri = picked
+            capturedIsVideo = mime.startsWith("video")
+            capturedPhotoUrl = picked.toString()
+            showPublishPreviewScreen = true
+        }
+    }
 
     // Photo/Video Capture & Publish Pipeline
     var capturedPhotoUrl by remember { mutableStateOf("") }
@@ -235,6 +262,12 @@ fun CameraScreen(
 
     // Null until enough onsets have been observed to be confident.
     val bpmValue: Int? = soundState.bpm
+
+    // Torch only applies to moving-image modes; switching back to PHOTO must
+    // turn it off so the lamp isn't left burning.
+    LaunchedEffect(selectedMode, flashMode) {
+        cameraController.setTorch(flashMode == "On" && selectedMode != "PHOTO")
+    }
 
     // Live comments are intentionally NOT simulated.
     //
@@ -287,18 +320,6 @@ fun CameraScreen(
         }
     }
 
-    // Camera viewfinder scale factor
-    val viewFinderScale by animateFloatAsState(
-        targetValue = when (zoomFactor) {
-            0.5f -> 0.8f
-            1.0f -> 1.0f
-            2.0f -> 1.4f
-            5.0f -> 2.0f
-            else -> 1.0f
-        },
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
-    )
-
     // Main Layout container
     Box(
         modifier = Modifier
@@ -308,19 +329,13 @@ fun CameraScreen(
         // -------------------------------------------------------------
         // CAMERA VIEWFINDER (live CameraX preview)
         // -------------------------------------------------------------
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { offset ->
-                            focusPoint = offset
-                        }
-                    )
-                }
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             // Real camera feed. Zoom is applied as a preview transform; the
             // look/effect overlays below composite on top of it.
+            // The preview is NOT scaled with graphicsLayer any more. That only
+            // magnified the on-screen image while the captured file stayed at
+            // 1x, so what you saw was never what you got. Zoom now goes through
+            // CameraControl.setZoomRatio and affects the real output.
             CameraViewfinder(
                 controller = cameraController,
                 useFrontCamera = isFrontCamera,
@@ -334,30 +349,15 @@ fun CameraScreen(
                     cameraError = message
                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = viewFinderScale,
-                        scaleY = viewFinderScale
-                    )
+                onZoomChanged = { applied -> zoomFactor = applied },
+                onFocusTap = { offset -> focusPoint = offset },
+                modifier = Modifier.fillMaxSize()
             )
 
             // LOOK COLOR TINT OVERLAY (Pulse, Neon, Glow, etc.)
-            val lookTint = when (selectedLook) {
-                "Pulse" -> Color(0xFFFF2D55).copy(alpha = 0.12f)
-                "Neon" -> Color(0xFF00F0FF).copy(alpha = 0.16f)
-                "Glow" -> Color(0xFFFFD700).copy(alpha = 0.14f)
-                "Midnight" -> Color(0xFF0033aa).copy(alpha = 0.22f)
-                "Vintage Party" -> Color(0xFFE28B00).copy(alpha = 0.12f)
-                "Electric" -> Color(0xFFB026FF).copy(alpha = 0.18f)
-                "Luxe" -> Color(0xFFF3E5AB).copy(alpha = 0.10f)
-                "Noir" -> Color(0xFF333333).copy(alpha = 0.25f)
-                "Stage" -> Color(0xFF666666).copy(alpha = 0.20f)
-                "Flash" -> Color(0xFFE0F7FA).copy(alpha = 0.08f)
-                "Sunset" -> Color(0xFFFF5722).copy(alpha = 0.15f)
-                "Rooftop" -> Color(0xFF3F51B5).copy(alpha = 0.12f)
-                else -> Color.Transparent
-            }
+            // Single source of truth: the same FomoLook that grades the saved
+            // file drives the preview overlay, so they can't drift apart.
+            val lookTint = activeGrade.tint.copy(alpha = activeGrade.tintAlpha)
             if (lookTint != Color.Transparent) {
                 Box(
                     modifier = Modifier
@@ -925,11 +925,22 @@ fun CameraScreen(
                 // Flash toggle
                 IconButton(
                     onClick = {
+                        if (!cameraController.hasFlashUnit) {
+                            Toast.makeText(context, "This camera has no flash.", Toast.LENGTH_SHORT).show()
+                            return@IconButton
+                        }
                         flashMode = when (flashMode) {
                             "Off" -> "On"
                             "On" -> "Auto"
                             else -> "Off"
                         }
+                        // ImageCapture.flashMode only fires for stills. Video and
+                        // Live need a continuous torch, so "On" maps to torch in
+                        // those modes - previously the flash button did nothing
+                        // at all while recording.
+                        val wantTorch = flashMode == "On" && selectedMode != "PHOTO"
+                        cameraController.setTorch(wantTorch)
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         Toast.makeText(context, "Flash: $flashMode", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier
@@ -979,18 +990,30 @@ fun CameraScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            listOf(0.5f, 1.0f, 2.0f, 5.0f).forEach { scale ->
-                val isSelected = zoomFactor == scale
+            // Only offer ratios this sensor actually supports. Showing a fixed
+            // 0.5x/5x ladder on a phone with no ultra-wide (or no 5x reach)
+            // meant tapping them did nothing observable.
+            val supportedZooms = remember(cameraController.minZoomRatio, cameraController.maxZoomRatio) {
+                listOf(0.5f, 1.0f, 2.0f, 5.0f).filter {
+                    it >= cameraController.minZoomRatio && it <= cameraController.maxZoomRatio
+                }.ifEmpty { listOf(1.0f) }
+            }
+            supportedZooms.forEach { scale ->
+                val isSelected = CameraCaptureController.isSameZoom(zoomFactor, scale)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(if (isSelected) Color.White else Color.Transparent)
-                        .clickable { zoomFactor = scale },
+                        .clickable {
+                            // Drives the real sensor zoom, not a preview transform.
+                            zoomFactor = cameraController.setZoomRatio(scale)
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "${scale}x",
+                        text = if (scale < 1f) "${scale}x" else "${scale.toInt()}x",
                         color = if (isSelected) Color.Black else Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 10.sp
@@ -1110,15 +1133,38 @@ fun CameraScreen(
                             .clip(RoundedCornerShape(12.dp))
                             .border(1.5.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
                             .clickable {
-                                Toast.makeText(context, "Opening FOMO Local Moments Drafts...", Toast.LENGTH_SHORT).show()
+                                // Opens the system photo picker. This was a Toast
+                                // reading "Opening FOMO Local Moments Drafts...".
+                                galleryPicker.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                                    )
+                                )
                             }
                     ) {
-                        AsyncImage(
-                            model = "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=200&auto=format&fit=crop",
-                            contentDescription = "Gallery Moments",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        // Shows the most recent capture rather than a stock image.
+                        if (lastCaptureThumb != null) {
+                            AsyncImage(
+                                model = lastCaptureThumb,
+                                contentDescription = "Open gallery",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.White.copy(alpha = 0.08f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoLibrary,
+                                    contentDescription = "Open gallery",
+                                    tint = Color.White.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
@@ -1147,6 +1193,7 @@ fun CameraScreen(
                                         return@clickable
                                     }
                                     cameraError = null
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     coroutineScope.launch {
                                         showFlashOverlay = true
                                         delay(100)
@@ -1162,13 +1209,21 @@ fun CameraScreen(
                                         result.fold(
                                             onSuccess = { uri ->
                                                 processingStep = 3
-                                                delay(250)
+                                                // Bake the selected Look into the
+                                                // actual file. Previously the grade
+                                                // existed only as a preview overlay,
+                                                // so the shared photo was ungraded.
+                                                val graded = LookProcessor.applyToImage(
+                                                    context = context,
+                                                    source = uri,
+                                                    grade = activeGrade
+                                                )
                                                 processingStep = 4
-                                                delay(200)
                                                 isProcessing = false
-                                                capturedMediaUri = uri
+                                                capturedMediaUri = graded
                                                 capturedIsVideo = false
-                                                capturedPhotoUrl = uri.toString()
+                                                capturedPhotoUrl = graded.toString()
+                                                lastCaptureThumb = graded
                                                 showPublishPreviewScreen = true
                                             },
                                             onFailure = { error ->
@@ -1198,12 +1253,24 @@ fun CameraScreen(
                                         val started = cameraController.startRecording { result ->
                                             result.fold(
                                                 onSuccess = { uri ->
-                                                    isProcessing = false
-                                                    processingStep = 0
-                                                    capturedMediaUri = uri
-                                                    capturedIsVideo = true
-                                                    capturedPhotoUrl = uri.toString()
-                                                    showPublishPreviewScreen = true
+                                                    coroutineScope.launch {
+                                                        // GPU colour grade via Media3
+                                                        // Transformer so the saved clip
+                                                        // matches the viewfinder.
+                                                        processingStep = 3
+                                                        val graded = LookVideoProcessor.applyToVideo(
+                                                            context = context,
+                                                            source = uri,
+                                                            grade = activeGrade
+                                                        )
+                                                        isProcessing = false
+                                                        processingStep = 0
+                                                        capturedMediaUri = graded
+                                                        capturedIsVideo = true
+                                                        capturedPhotoUrl = graded.toString()
+                                                        lastCaptureThumb = graded
+                                                        showPublishPreviewScreen = true
+                                                    }
                                                 },
                                                 onFailure = { error ->
                                                     isProcessing = false
@@ -1275,13 +1342,29 @@ fun CameraScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val looks = listOf("Pulse", "Neon", "Glow", "Midnight", "Vintage Party", "Electric", "Luxe", "Noir", "Stage", "Flash", "Sunset", "Rooftop")
-                        items(looks) { look ->
+                        // Driven by the FomoLook catalogue so the carousel, the
+                        // preview overlay and the baked grade always agree.
+                        items(FomoLook.carousel) { lookEntry ->
+                            val look = lookEntry.displayName
                             val isCurrent = selectedLook == look
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
-                                    .clickable { selectedLook = look }
+                                    .pointerInput(look) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                selectedLook = look
+                                                showIntensitySlider = false
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            },
+                                            // Spec: long press adjusts intensity.
+                                            onLongPress = {
+                                                selectedLook = look
+                                                showIntensitySlider = true
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            }
+                                        )
+                                    }
                                     .padding(vertical = 4.dp)
                             ) {
                                 Text(
@@ -1598,6 +1681,53 @@ fun CameraScreen(
         }
 
         // -------------------------------------------------------------
+        // LOOK INTENSITY (spec: "Long press adjusts intensity")
+        // -------------------------------------------------------------
+        if (showIntensitySlider && !activeLook.isIdentity) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 180.dp)
+                    .fillMaxWidth(0.8f)
+                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${activeLook.displayName} intensity",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "${(lookIntensity * 100).roundToInt()}%",
+                        color = Color(0xFFFFD700),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = lookIntensity,
+                    onValueChange = { lookIntensity = it },
+                    valueRange = 0f..1f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFFFF2D55),
+                        activeTrackColor = Color(0xFFFF2D55)
+                    )
+                )
+                TextButton(onClick = { showIntensitySlider = false }) {
+                    Text("Done", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
         // CRASH RECOVERY  ("Recovered Live Found" - spec requirement)
         // A session left in RECORDING state means the process died mid-
         // broadcast. Previously the recording was simply orphaned.
@@ -1783,17 +1913,27 @@ fun CameraScreen(
                                         val started = cameraController.startRecording { result ->
                                             result.fold(
                                                 onSuccess = { uri ->
-                                                    isProcessing = false
-                                                    processingStep = 0
-                                                    liveSessionStore.markEnded(sessionId, uri.toString(), peakViewers)
-                                                    // Keep the id so the publish
-                                                    // step can complete this
-                                                    // session's lifecycle.
-                                                    activeLiveSessionId = sessionId
-                                                    capturedMediaUri = uri
-                                                    capturedIsVideo = true
-                                                    capturedPhotoUrl = uri.toString()
-                                                    showPublishPreviewScreen = true
+                                                    coroutineScope.launch {
+                                                        // Grade the replay so it matches
+                                                        // what the broadcaster framed.
+                                                        val graded = LookVideoProcessor.applyToVideo(
+                                                            context = context,
+                                                            source = uri,
+                                                            grade = activeGrade
+                                                        )
+                                                        isProcessing = false
+                                                        processingStep = 0
+                                                        liveSessionStore.markEnded(sessionId, graded.toString(), peakViewers)
+                                                        // Keep the id so the publish
+                                                        // step can complete this
+                                                        // session's lifecycle.
+                                                        activeLiveSessionId = sessionId
+                                                        capturedMediaUri = graded
+                                                        capturedIsVideo = true
+                                                        capturedPhotoUrl = graded.toString()
+                                                        lastCaptureThumb = graded
+                                                        showPublishPreviewScreen = true
+                                                    }
                                                 },
                                                 onFailure = { error ->
                                                     isProcessing = false

@@ -148,7 +148,18 @@ android {
 // Keep the Kotlin JVM target in lockstep with compileOptions. Without this the
 // Kotlin and Java targets can diverge and the build fails with an
 // "Inconsistent JVM-target compatibility" error.
-kotlin { jvmToolchain(17) }
+kotlin {
+  jvmToolchain(17)
+  compilerOptions {
+    freeCompilerArgs.addAll(
+      // Media3 Transformer / effect APIs (used to bake Looks into video) are
+      // annotated @UnstableApi. Opting in here avoids scattering @OptIn across
+      // every call site.
+      "-opt-in=androidx.media3.common.util.UnstableApi",
+      "-opt-in=kotlin.RequiresOptIn",
+    )
+  }
+}
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
@@ -177,6 +188,18 @@ dependencies {
   implementation(libs.androidx.camera.lifecycle)
   implementation(libs.androidx.camera.view)
   implementation(libs.androidx.camera.video)
+  // Vendor HDR / Night / Bokeh camera extensions where the device supports them.
+  implementation(libs.androidx.camera.extensions)
+  // EXIF orientation handling for captured stills.
+  implementation(libs.androidx.exifinterface)
+  // Media3: replay playback + GPU video effects (Transformer) for baking Looks.
+  implementation(libs.androidx.media3.exoplayer)
+  implementation(libs.androidx.media3.ui)
+  implementation(libs.androidx.media3.transformer)
+  implementation(libs.androidx.media3.effect)
+  implementation(libs.androidx.media3.common)
+  // Reliable background replay/moment uploads with retry + constraints.
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)

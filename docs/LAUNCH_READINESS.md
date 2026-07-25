@@ -111,8 +111,8 @@ Audited against the supplied spec. "Real" = actually functional, not a UI shell.
 | Low-confidence fallback (Nearby/Search/Skip) | ⚠️ Partial | Nearby + Skip implemented; **venue search not built.** |
 | Publish Settings (visibility/destination/venue) | ✅ Real | **Was a privacy bug** — settings were collected then discarded; "Private" posted publicly. Now enforced. |
 | Upload Engine (per-destination progress) | ⚠️ Partial | Real Firebase Storage upload + real %; **per-destination checklist still cosmetic.** |
-| Looks (12 profiles) | ⚠️ Preview-only | Colour overlays on preview; **not baked into the saved file.** No GPU shader pipeline. |
-| Looks long-press intensity | ❌ Missing | Spec requires it. |
+| Looks (13 profiles) | ✅ Real | `FomoLook` catalogue drives preview AND output. Stills graded via ColorMatrix (EXIF preserved); video graded on GPU via **Media3 Transformer**. Preview and saved file can no longer drift. |
+| Looks long-press intensity | ✅ Real | Long-press opens a 0-100% intensity slider; interpolates from neutral. |
 | Looks carousel placement | ⚠️ Deviates | Spec puts it full-width below capture; it is a 90dp column beside it. |
 | Creative Effects (11) | ⚠️ Preview-only | Same as Looks — not applied to output. |
 | Moment Templates (10) | ❌ Cosmetic | UI list only; no template is applied. |
@@ -127,10 +127,25 @@ Audited against the supplied spec. "Real" = actually functional, not a UI shell.
 | Performance targets (250 ms, 60 FPS) | ❓ Unverified | Never profiled — nothing has been run. |
 | Creator Tools | ❌ Missing | None of the 8 items exist. |
 
-**Net:** roughly 7 of ~20 spec subsystems are genuinely implemented. The camera
+**Net:** roughly 10 of ~20 spec subsystems are genuinely implemented. The camera
 now *captures and publishes correctly*, which it did not before, but the
 differentiating engines (Sound Aware, Dual Shot, AI processing, Offline queue)
 are still absent.
+
+
+### Flagship-camera hardening (this pass)
+
+| Issue | Impact | Fix |
+|---|---|---|
+| **No rotation handling** | Every photo/video taken in landscape saved **rotated 90°**. The activity locks orientation config changes, so CameraX never learned the device had turned. | `OrientationEventListener` drives `targetRotation` on both use cases. |
+| **Zoom was fake** | Buttons scaled the preview with `graphicsLayer`; the captured file stayed at 1x. What you saw was never what you got. | Real `CameraControl.setZoomRatio`, clamped to the sensor's range, plus **pinch-to-zoom**. Unsupported ratios are hidden. |
+| **Tap-to-focus was fake** | Drew a focus ring; no metering ever ran. | Real `startFocusAndMetering` (AF+AE) at the tapped point. |
+| **Flash dead for video** | `ImageCapture.flashMode` only fires for stills, so the button did nothing while recording. | Torch via `CameraControl.enableTorch` for VIDEO/LIVE; auto-off on return to PHOTO. |
+| **Selfies not mirrored** | Front-camera stills saved un-mirrored, not matching the preview. | `Metadata.isReversedHorizontal`. |
+| **Crash on no front camera** | Requesting an absent lens failed the whole bind → black screen. | Falls back to an available lens. |
+| **Gallery button was a Toast** | "Opening FOMO Local Moments Drafts..." | Real system photo picker (`PickVisualMedia`, no storage permission) + last-capture thumbnail. |
+| No haptics | Felt unresponsive vs. flagship cameras. | Shutter, zoom and Look-selection haptics. |
+| Photos invisible in gallery | Files written without clearing `IS_PENDING`. | Published after save. |
 
 ---
 
