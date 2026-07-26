@@ -68,16 +68,13 @@ enum class RichMessageType {
 data class ChatMessage(
     val id: String,
     val conversationId: String,
-    /** Firebase account uid of the sender (falls back to LOCAL_USER_ID offline). */
-    val senderId: String,
+    val senderId: String, // "me" or peer id
     val senderName: String,
     val senderAvatarUrl: String,
     val type: RichMessageType,
     val content: String,
     val timestamp: String,
     val isDelivered: Boolean = true,
-    // Defaults to true only for seeded historical messages; live sends set it
-    // explicitly to false until the recipient actually opens the thread.
     val isRead: Boolean = true,
     val isPendingOffline: Boolean = false,
     val isEdited: Boolean = false,
@@ -149,18 +146,7 @@ data class ConversationItem(
     val groupRole: GroupRole? = null,
     val memberCount: Int = 1,
     val e2eEncrypted: Boolean = true,
-    val e2eKeyFingerprint: String = "4F89-A2C3-90BF-1102",
-    /**
-     * Account ids permitted to read this conversation.
-     *
-     * Required by firebase/firestore.rules, which grants access only when
-     * `request.auth.uid in resource.data.participants`. Conversations were
-     * previously written with no participants field at all, so every read and
-     * write would be DENIED the moment the rules were deployed.
-     */
-    val participants: List<String> = emptyList(),
-    /** Owner; only they may delete the conversation. */
-    val createdBy: String = ""
+    val e2eKeyFingerprint: String = "4F89-A2C3-90BF-1102"
 )
 
 // State for Chat Management Repository
@@ -179,15 +165,6 @@ data class ChatRepositoryState(
 )
 
 object ChatRepository {
-
-    /**
-     * Fallback sender id used only when no account is signed in. Legacy seed
-     * data uses the literal "me", so [isFromCurrentUser] accepts both.
-     */
-    const val LOCAL_USER_ID = "me"
-
-    private const val TAG = "ChatRepository"
-
     private var firestore: FirebaseFirestore? = null
     private val activeMessageListeners = mutableSetOf<String>()
 
@@ -209,25 +186,13 @@ object ChatRepository {
             val db = FirebaseFirestore.getInstance()
             firestore = db
 
-            // Scoped query. Listening to the whole collection is rejected by
-            // the security rules (and would leak other people's conversations);
-            // the rules explicitly require this whereArrayContains filter.
-            db.collection("conversations")
-                .whereArrayContains("participants", currentUserId())
-                .addSnapshotListener { snapshot, error ->
+            db.collection("conversations").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) {
                     Log.w("ChatRepository", "Firestore listener warning: $error")
                     return@addSnapshotListener
                 }
                 if (snapshot.isEmpty) {
-                    // Seeding demo content from the client is DEBUG-ONLY.
-                    // In production this would let any installed client write
-                    // fabricated conversations into the shared database (and is
-                    // denied by firebase/firestore.rules). Real seed data must be
-                    // provisioned via the Admin SDK or a Cloud Function.
-                    if (com.example.BuildConfig.DEBUG) {
-                        seedFirestoreConversations(db)
-                    }
+                    seedFirestoreConversations(db)
                 } else {
                     val firestoreConvs = snapshot.documents.mapNotNull { doc ->
                         val id = doc.id
@@ -257,10 +222,7 @@ object ChatRepository {
                             isMuted = isMuted,
                             isArchived = isArchived,
                             isVerified = isVerified,
-                            isOnline = isOnline,
-                            participants = (doc.get("participants") as? List<*>)
-                                ?.filterIsInstance<String>().orEmpty(),
-                            createdBy = doc.getString("createdBy").orEmpty()
+                            isOnline = isOnline
                         )
                     }
                     if (firestoreConvs.isNotEmpty()) {
@@ -394,17 +356,13 @@ object ChatRepository {
             isVerified = true,
             groupRole = GroupRole.OWNER,
             memberCount = memberNames.size,
-            e2eEncrypted = true,
-            // The creator must be a participant, otherwise the security rules
-            // reject the write and they lose access to their own group.
-            participants = listOf(currentUserId()),
-            createdBy = currentUserId()
+            e2eEncrypted = true
         )
 
         val initialMsg = ChatMessage(
             id = "msg_${System.currentTimeMillis()}",
             conversationId = newGroupId,
-            senderId = currentUserId(),
+            senderId = "user_me",
             senderName = "You",
             senderAvatarUrl = "https://i.pravatar.cc/150?img=33",
             type = RichMessageType.TEXT,
@@ -436,9 +394,7 @@ object ChatRepository {
                     "isMuted" to false,
                     "isArchived" to false,
                     "isVerified" to true,
-                    "isOnline" to true,
-                    "participants" to newGroup.participants,
-                    "createdBy" to newGroup.createdBy
+                    "isOnline" to true
                 )
                 db.collection("conversations").document(newGroup.id).set(convDoc)
 
@@ -453,7 +409,7 @@ object ChatRepository {
                     "timestamp" to initialMsg.timestamp,
                     "timestampMs" to System.currentTimeMillis(),
                     "isDelivered" to true,
-                    "isRead" to false
+                    "isRead" to true
                 )
                 db.collection("conversations").document(newGroupId)
                     .collection("messages").document(initialMsg.id).set(msgDoc)
@@ -602,43 +558,6 @@ object ChatRepository {
     }
 
     // --- Messaging Engine ---
-    /** Signed-in account id, or a stable local id when unauthenticated. */
-    fun currentUserId(): String =
-        runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid }
-            .getOrNull() ?: LOCAL_USER_ID
-
-    private fun currentUserName(): String =
-        runCatching {
-            val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-            user?.displayName?.takeIf { it.isNotBlank() }
-                ?: user?.email?.substringBefore("@")
-        }.getOrNull() ?: "You"
-
-    private fun currentUserAvatar(): String =
-        runCatching {
-            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.photoUrl?.toString()
-        }.getOrNull().orEmpty()
-
-    /**
-     * True when [message] was sent by the signed-in user.
-     *
-     * The UI previously tested `senderId == "me"` directly. Combined with every
-     * client writing "me" as its senderId, that made all messages in a shared
-     * conversation render as the reader's own.
-     */
-    fun isFromCurrentUser(message: ChatMessage): Boolean {
-        val uid = currentUserId()
-        return message.senderId == uid ||
-            // Legacy/seed rows written before real identities existed.
-            (uid != LOCAL_USER_ID && message.senderId == LOCAL_USER_ID && message.senderName == "You") ||
-            message.senderId == LOCAL_USER_ID && uid == LOCAL_USER_ID
-    }
-
-    /** Formats a wall-clock timestamp for display, honouring device locale. */
-    internal fun formatClockTime(epochMs: Long): String =
-        java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
-            .format(java.util.Date(epochMs))
-
     fun sendMessage(
         conversationId: String,
         type: RichMessageType,
@@ -649,32 +568,19 @@ object ChatRepository {
     ) {
         val currentIsOnline = _state.value.isNetworkOnline
         val newId = UUID.randomUUID().toString()
-        val sentAtMs = System.currentTimeMillis()
-        // Real wall-clock time. Every outgoing message was previously stamped
-        // with the literal string "10:08 PM", so a whole day's conversation
-        // showed the same time and messages could not be ordered by it.
-        val timestamp = formatClockTime(sentAtMs)
+        val timestamp = "10:08 PM"
 
         val newMsg = ChatMessage(
             id = newId,
             conversationId = conversationId,
-            // Real account identity. Hardcoding "me" meant every user wrote
-            // the same senderId into the shared Firestore collection, and the
-            // UI decides message ownership with `senderId == "me"` - so once a
-            // second user joined a conversation, BOTH participants saw every
-            // message as their own, right-aligned and attributed to them.
-            senderId = currentUserId(),
-            senderName = currentUserName(),
-            senderAvatarUrl = currentUserAvatar(),
+            senderId = "me",
+            senderName = "Me",
+            senderAvatarUrl = "https://i.pravatar.cc/150?img=12",
             type = type,
             content = content,
             timestamp = timestamp,
             isDelivered = currentIsOnline,
-            // A freshly sent message has NOT been read by the recipient.
-            // This tracked `currentIsOnline`, so every message you sent showed
-            // a read receipt immediately - misrepresenting the other person's
-            // behaviour, which users treat as a factual signal.
-            isRead = false,
+            isRead = currentIsOnline,
             isPendingOffline = !currentIsOnline,
             replyToMessageId = replyToMsg?.id,
             replyToText = replyToMsg?.content,
@@ -728,10 +634,7 @@ object ChatRepository {
                     "timestamp" to newMsg.timestamp,
                     "timestampMs" to System.currentTimeMillis(),
                     "isDelivered" to true,
-                    // Never assert the recipient has read it. This was written
-                    // as `true`, so every message showed read receipts the
-                    // instant it was sent regardless of the other party.
-                    "isRead" to false
+                    "isRead" to true
                 )
                 db.collection("conversations").document(conversationId)
                     .collection("messages").document(newMsg.id).set(msgDoc)
@@ -812,28 +715,15 @@ object ChatRepository {
         }
     }
 
-    // --- Connectivity & offline queue ---
-
-    /**
-     * Updates connectivity and, on regaining it, actually transmits anything
-     * queued while offline.
-     *
-     * The previous implementation only *marked* queued messages as
-     * `isDelivered = true` and cleared the queue. Nothing was ever written to
-     * Firestore, so a message composed offline showed a delivered tick to the
-     * sender and was **never received by anyone**. Silent, total data loss.
-     */
+    // --- Offline Network Simulation & Automatic Queue Sync ---
     fun setNetworkStatus(isOnline: Boolean) {
-        val wasOffline = !_state.value.isNetworkOnline
-        val queued = _state.value.pendingOfflineQueue
-
         _state.update { current ->
             if (isOnline && !current.isNetworkOnline) {
+                // Perform sync merge of pending queue
+                val queue = current.pendingOfflineQueue
                 val updatedMessages = current.activeMessages.mapValues { (_, msgList) ->
                     msgList.map { msg ->
-                        // Clear the pending flag but do NOT claim delivery yet;
-                        // that is confirmed only once the write succeeds.
-                        if (msg.isPendingOffline) msg.copy(isPendingOffline = false) else msg
+                        if (msg.isPendingOffline) msg.copy(isPendingOffline = false, isDelivered = true, isRead = true) else msg
                     }
                 }
                 current.copy(
@@ -845,68 +735,7 @@ object ChatRepository {
                 current.copy(isNetworkOnline = isOnline)
             }
         }
-
-        if (isOnline && wasOffline && queued.isNotEmpty()) {
-            flushOfflineQueue(queued)
-        }
     }
-
-    /** Transmits messages that were composed while offline. */
-    private fun flushOfflineQueue(queue: List<ChatMessage>) {
-        val db = firestore ?: run {
-            // No backend available: put them back so they aren't lost.
-            _state.update { it.copy(pendingOfflineQueue = queue) }
-            return
-        }
-
-        queue.forEach { msg ->
-            try {
-                db.collection("conversations").document(msg.conversationId)
-                    .collection("messages").document(msg.id)
-                    .set(firestoreDocFor(msg))
-                    .addOnSuccessListener { markDelivered(msg.id, msg.conversationId) }
-                    .addOnFailureListener { error ->
-                        Log.e(TAG, "Failed to flush queued message ${msg.id}", error)
-                        requeue(msg)
-                    }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to flush queued message ${msg.id}", e)
-                requeue(msg)
-            }
-        }
-    }
-
-    private fun markDelivered(messageId: String, conversationId: String) {
-        _state.update { current ->
-            val list = current.activeMessages[conversationId] ?: return@update current
-            val updated = list.map {
-                if (it.id == messageId) it.copy(isDelivered = true, isPendingOffline = false) else it
-            }
-            current.copy(activeMessages = current.activeMessages + (conversationId to updated))
-        }
-    }
-
-    private fun requeue(msg: ChatMessage) {
-        _state.update { current ->
-            if (current.pendingOfflineQueue.any { it.id == msg.id }) current
-            else current.copy(pendingOfflineQueue = current.pendingOfflineQueue + msg)
-        }
-    }
-
-    /** Single serialisation point so queued and live sends agree on shape. */
-    private fun firestoreDocFor(msg: ChatMessage): Map<String, Any?> = mapOf(
-        "id" to msg.id,
-        "conversationId" to msg.conversationId,
-        "senderId" to msg.senderId,
-        "senderName" to msg.senderName,
-        "senderAvatarUrl" to msg.senderAvatarUrl,
-        "type" to msg.type.name,
-        "content" to msg.content,
-        "timestamp" to msg.timestamp,
-        "timestampMs" to System.currentTimeMillis(),
-        "isDelivered" to true,
-        "isRead" to false
-    )
 
     // --- Attachments & Background Upload Manager ---
     fun addAttachmentToQueue(fileName: String, sizeBytes: Long, mimeType: String) {

@@ -1,7 +1,6 @@
 package com.example.feature.feed
 
 import com.example.core.data.feed.FeedRepository
-import com.example.core.data.feed.InvitationData
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -91,20 +90,13 @@ class FeedRepositoryTest {
     }
 
     @Test
-    fun testEndInvitationEarly() {
-        // Replaces testSetInvitationStatus. Invitation state is now derived
-        // from timestamps rather than a mutable status string, so a stored
-        // status can no longer contradict the clock.
-        val target = FeedRepository.state.value.moments.first {
-            it.invitation != null && it.invitation!!.stateAt() == InvitationData.State.ACTIVE
-        }
+    fun testSetInvitationStatus() {
+        val targetMoment = FeedRepository.state.value.moments.first { it.invitation != null }
+        val newStatus = "CLOSED"
 
-        FeedRepository.endInvitation(target.id)
+        FeedRepository.setInvitationStatus(targetMoment.id, newStatus)
 
-        val updated = FeedRepository.state.value.moments.first { it.id == target.id }
-        assertEquals(
-            InvitationData.State.ENDED,
-            updated.invitation?.stateAt()
-        )
+        val updatedMoment = FeedRepository.state.value.moments.first { it.id == targetMoment.id }
+        assertEquals(newStatus, updatedMoment.invitation?.status)
     }
 }

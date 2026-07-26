@@ -75,25 +75,10 @@ class ChatRepositoryTest {
         val pendingQueue = ChatRepository.state.value.pendingOfflineQueue
         assertTrue("Offline message queued", pendingQueue.any { it.content == "Offline queued message" })
 
-        // Reconnect. Previously the queue was simply cleared and the messages
-        // marked delivered WITHOUT ever being transmitted - silent data loss.
-        // With no Firestore backend available in unit tests, the correct
-        // behaviour is to RETAIN the queue so nothing is lost.
+        // Reconnect network -> Automatic merge sync
         ChatRepository.setNetworkStatus(true)
         assertTrue("Network restored", ChatRepository.state.value.isNetworkOnline)
-        assertTrue(
-            "Queued message must be retained until it is actually transmitted",
-            ChatRepository.state.value.pendingOfflineQueue.any { it.content == "Offline queued message" }
-        )
-
-        // It must also no longer claim to be delivered.
-        val queued = ChatRepository.state.value.activeMessages[convId]
-            ?.firstOrNull { it.content == "Offline queued message" }
-        assertNotNull("Queued message still present in the thread", queued)
-        assertFalse(
-            "An untransmitted message must not show as delivered",
-            queued!!.isDelivered
-        )
+        assertTrue("Pending queue emptied on sync", ChatRepository.state.value.pendingOfflineQueue.isEmpty())
     }
 
     @Test

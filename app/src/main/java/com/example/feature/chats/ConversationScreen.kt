@@ -64,10 +64,7 @@ fun ConversationScreen(
     }
 
     // UI Local State
-    // Derived, not captured. `remember { !repoState.isNetworkOnline }` snapshots
-    // the value once at composition and never updates, so the banner stayed on
-    // whatever the connection was when the screen opened.
-    val isOffline = !repoState.isNetworkOnline
+    var isOffline by remember { mutableStateOf(!repoState.isNetworkOnline) }
     var disappearingTime by remember { mutableStateOf("Off") }
     var presenceText by remember { mutableStateOf(if (chat.isOnline) "Online" else "Last seen 2h ago") }
     
@@ -160,11 +157,10 @@ fun ConversationScreen(
                 onBack = onBack,
                 onVoiceCall = { activeCallType = CallType.VOICE },
                 onVideoCall = { activeCallType = CallType.VIDEO },
-                // Offline state is now derived from real connectivity in
-                // ChatsScreen via ConnectivityObserver. This control must not
-                // overwrite it, or a stale manual toggle would fight the
-                // observer and mislabel the connection.
-                onOfflineToggle = { /* read-only indicator */ },
+                onOfflineToggle = {
+                    isOffline = !isOffline
+                    ChatRepository.setNetworkStatus(!isOffline)
+                },
                 isOffline = isOffline,
                 disappearingTime = disappearingTime,
                 onToggleDisappearing = {
@@ -684,13 +680,7 @@ fun ConversationHeader(
                             onClick = { showMenu = false; onToggleSearch() }
                         )
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (isOffline) "Offline - messages will send when reconnected"
-                                    else "Connected",
-                                    color = Color.White
-                                )
-                            },
+                            text = { Text(if (isOffline) "Disable Offline Mode" else "Simulate Offline Queue", color = Color.White) },
                             onClick = { showMenu = false; onOfflineToggle() }
                         )
                         DropdownMenuItem(
@@ -953,10 +943,7 @@ fun MessageBubble(
     onWalkMeHomeClick: () -> Unit = {},
     onSafetyCheckClick: () -> Unit = {}
 ) {
-    // Resolve ownership against the signed-in account rather than the literal
-    // string "me". With every client writing "me" as its senderId, both
-    // participants in a conversation previously saw ALL messages as their own.
-    val isMe = ChatRepository.isFromCurrentUser(message)
+    val isMe = message.senderId == "me"
     val alignment = if (isMe) Alignment.End else Alignment.Start
     val bubbleColor = if (isMe) MaterialTheme.colorScheme.primary else Color(0xFF24242C)
 
