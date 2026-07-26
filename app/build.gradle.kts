@@ -22,6 +22,19 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    externalNativeBuild {
+      cmake {
+        cppFlags("-std=c++17")
+        arguments("-DANDROID_STL=c++_shared")
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = "3.22.1"
+    }
   }
 
   signingConfigs {
@@ -79,10 +92,10 @@ dependencies {
   implementation(libs.firebase.auth)
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  // implementation(libs.androidx.camera.camera2)
-  // implementation(libs.androidx.camera.core)
-  // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -112,6 +125,7 @@ dependencies {
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
+  implementation(libs.oboe)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)

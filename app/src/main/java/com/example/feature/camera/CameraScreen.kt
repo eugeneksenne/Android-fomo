@@ -1,5 +1,11 @@
 package com.example.feature.camera
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.core.content.ContextCompat
 import com.example.core.data.feed.FeedRepository
 
 import androidx.compose.animation.*
@@ -65,6 +71,14 @@ fun CameraScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // Runtime Camera & Microphone Permissions State using CameraPermissionHandler
+    val permissionHandler = remember(context) { CameraPermissionHandler(context) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
+    val permissionState by rememberCameraPermissionState()
+    val hasCameraPermission = permissionState.hasCameraPermission
+
     // Navigation & Layout States
     var selectedMode by remember { mutableStateOf("PHOTO") } // PHOTO, VIDEO, LIVE
     var selectedLook by remember { mutableStateOf("Pulse") } // Pulse, Neon, Glow, Midnight, Stage, Electric
@@ -95,6 +109,15 @@ fun CameraScreen(
     var pollVotesDJ1 by remember { mutableStateOf(142) }
     var pollVotesDJ2 by remember { mutableStateOf(84) }
 
+    // FOMO Live Engine State Extensions
+    var liveLinkMode by remember { mutableStateOf(LiveLinkMode.MANUAL) }
+    var selectedLiveCameraId by remember { mutableStateOf("cam_1") }
+    var activeAudioCameraId by remember { mutableStateOf("cam_1") }
+    var showReplayVerificationModal by remember { mutableStateOf(false) }
+    var isViewerWatchMode by remember { mutableStateOf(false) }
+    var aiDirectorHighlightTitle by remember { mutableStateOf("⚡ CROWD PEAK DETECTED (130 BPM)") }
+    var aiDirectorHighlightSubtitle by remember { mutableStateOf("AI Live Director auto-tracking DJ Booth @Neo") }
+
     // Video Capture States
     var isRecordingVideo by remember { mutableStateOf(false) }
     var videoDurationSeconds by remember { mutableStateOf(0) }
@@ -114,6 +137,47 @@ fun CameraScreen(
 
     // Drag-and-drop dual shot window state
     var dualShotOffset by remember { mutableStateOf(Offset(30f, 150f)) }
+
+    // Audio Engine, Thermal Monitor & Camera Hardware Hooks
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val cameraManager = remember { CameraManager(context) }
+    var isCameraHardwareActive by remember { mutableStateOf(false) }
+    var activePreviewView by remember { mutableStateOf<androidx.camera.view.PreviewView?>(null) }
+
+    val audioEngine = remember { AudioEngine() }
+    val audioTelemetry by audioEngine.telemetry.collectAsState()
+    val thermalMonitor = remember { ThermalMonitor(context) }
+    val thermalState by thermalMonitor.thermalState.collectAsState()
+
+    DisposableEffect(lifecycleOwner) {
+        thermalMonitor.startMonitoring()
+        onDispose {
+            thermalMonitor.stopMonitoring()
+            audioEngine.stopListening()
+            cameraManager.release()
+        }
+    }
+
+    // Start low-latency DSP audio analysis when in LIVE mode or broadcasting
+    DisposableEffect(selectedMode, isBroadcasting) {
+        if (selectedMode == "LIVE" || isBroadcasting) {
+            audioEngine.startListening()
+        } else {
+            audioEngine.stopListening()
+        }
+        onDispose {
+            if (selectedMode != "LIVE" && !isBroadcasting) {
+                audioEngine.stopListening()
+            }
+        }
+    }
+
+    // Sync detected BPM from AudioEngine hardware audio pipeline
+    LaunchedEffect(audioTelemetry.bpm) {
+        if (audioTelemetry.bpm > 0) {
+            bpmValue = audioTelemetry.bpm
+        }
+    }
 
     // Screen Flash effect (Photo Capture trigger)
     var showFlashOverlay by remember { mutableStateOf(false) }
@@ -231,18 +295,94 @@ fun CameraScreen(
                     )
                 }
         ) {
-            // Main camera lens feed background
-            AsyncImage(
-                model = "https://images.unsplash.com/photo-1545128485-c400e7702796?q=80&w=1200&auto=format&fit=crop",
-                contentDescription = "Camera Preview Lens Feed",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = viewFinderScale,
-                        scaleY = viewFinderScale
+            // Main camera lens feed with CameraX PreviewView & fallback stream preview
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (hasCameraPermission) {
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { ctx ->
+                            androidx.camera.view.PreviewView(ctx).also { previewView ->
+                                activePreviewView = previewView
+                                cameraManager.startCamera(lifecycleOwner, previewView) { success ->
+                                    isCameraHardwareActive = success
+                                }
+                            }
+                        },
+                        update = { previewView ->
+                            activePreviewView = previewView
+                            cameraManager.setZoomRatio(zoomFactor)
+                            if (!isCameraHardwareActive) {
+                                cameraManager.startCamera(lifecycleOwner, previewView) { success ->
+                                    isCameraHardwareActive = success
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = viewFinderScale,
+                                scaleY = viewFinderScale
+                            )
                     )
-            )
+                }
+
+                // Fallback live camera lens stream preview when hardware provider is inactive or permission pending
+                if (!isCameraHardwareActive || !hasCameraPermission) {
+                    AsyncImage(
+                        model = "https://images.unsplash.com/photo-1545128485-c400e7702796?q=80&w=1200&auto=format&fit=crop",
+                        contentDescription = "Camera Preview Lens Feed",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = viewFinderScale,
+                                scaleY = viewFinderScale
+                            )
+                    )
+
+                    if (!hasCameraPermission) {
+                        CameraPermissionRationaleCard(
+                            onRequestPermissions = {
+                                permissionLauncher.launch(CameraPermissionHandler.REQUIRED_PERMISSIONS)
+                            },
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                }
+            }
+
+            // SOUND AWARE LIVE RENDER CANVAS OVERLAY
+            if (selectedMode == "LIVE" || isBroadcasting) {
+                SoundAwareLiveRender(
+                    bpm = bpmValue,
+                    activeEffect = selectedLook
+                )
+            }
+
+            // QUAD VIEW MULTI-CAMERA GRID (If Quad Mode enabled in LIVE)
+            if (selectedMode == "LIVE" && liveLinkMode == LiveLinkMode.QUAD) {
+                QuadViewGrid(
+                    cameras = defaultTruthNightclubCameras,
+                    activeAudioCameraId = activeAudioCameraId,
+                    onSelectAudioCamera = { activeAudioCameraId = it }
+                )
+            }
+
+            // PICTURE-IN-PICTURE (PiP) FLOATING OVERLAY
+            if (selectedMode == "LIVE" && liveLinkMode == LiveLinkMode.PIP) {
+                val secCam = defaultTruthNightclubCameras.firstOrNull { it.id != selectedLiveCameraId } ?: defaultTruthNightclubCameras[1]
+                PipOverlayView(
+                    secondaryCamera = secCam,
+                    onSwapPrimary = {
+                        val temp = selectedLiveCameraId
+                        selectedLiveCameraId = secCam.id
+                        activeAudioCameraId = secCam.id
+                        Toast.makeText(context, "Swapped Primary Live to ${secCam.name}", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 180.dp, end = 16.dp)
+                )
+            }
 
             // LOOK COLOR TINT OVERLAY (Pulse, Neon, Glow, etc.)
             val lookTint = when (selectedLook) {
@@ -731,6 +871,28 @@ fun CameraScreen(
                     )
                 }
 
+                // Flip Lens toggle
+                IconButton(
+                    onClick = {
+                        activePreviewView?.let { pView ->
+                            cameraManager.toggleCameraLens(lifecycleOwner, pView)
+                        }
+                        val isFront = cameraManager.lensFacing == CameraSelector.LENS_FACING_FRONT
+                        Toast.makeText(context, if (isFront) "Front Selfie Lens Active" else "Back Main Lens Active", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FlipCameraAndroid,
+                        contentDescription = "Flip Camera Lens",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
                 // Flash toggle
                 IconButton(
                     onClick = {
@@ -739,6 +901,7 @@ fun CameraScreen(
                             "On" -> "Auto"
                             else -> "Off"
                         }
+                        cameraManager.setTorchEnabled(flashMode == "On")
                         Toast.makeText(context, "Flash: $flashMode", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier
@@ -774,6 +937,67 @@ fun CameraScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+            }
+        }
+
+        // LIVE LINK MULTI-CAM BAR & AI DIRECTOR HIGHLIGHT (When in LIVE mode)
+        if (selectedMode == "LIVE") {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 100.dp)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (thermalState.isThermalThrottlingActive) {
+                    Surface(
+                        color = Color(0xFFFF9500).copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Thermostat,
+                                contentDescription = "Thermal Warning",
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Adaptive Protection: ${thermalState.temperatureDescription} (${thermalState.recommendedFps} FPS, ${(thermalState.recommendedBitrate / 1000000.0)} Mbps)",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                if (liveLinkMode == LiveLinkMode.AI_DIRECTOR) {
+                    AIDirectorBadge(
+                        title = aiDirectorHighlightTitle,
+                        subtitle = aiDirectorHighlightSubtitle
+                    )
+                }
+
+                LiveLinkBar(
+                    cameras = defaultTruthNightclubCameras,
+                    selectedCameraId = selectedLiveCameraId,
+                    currentMode = liveLinkMode,
+                    onSelectCamera = { cam ->
+                        selectedLiveCameraId = cam.id
+                        activeAudioCameraId = cam.id
+                        Toast.makeText(context, "Switched to ${cam.name} (${cam.handle})", Toast.LENGTH_SHORT).show()
+                    },
+                    onModeChange = { mode ->
+                        liveLinkMode = mode
+                        Toast.makeText(context, "Mode switched to ${mode.name}", Toast.LENGTH_SHORT).show()
+                    }
+                )
             }
         }
 
@@ -976,22 +1200,9 @@ fun CameraScreen(
                                 }
                                 "LIVE" -> {
                                     if (isBroadcasting) {
-                                        // End Live Broadcast
+                                        // End Live Broadcast & Trigger Replay Verification Engine
                                         isBroadcasting = false
-                                        isProcessing = true
-                                        processingStep = 1
-                                        coroutineScope.launch {
-                                            delay(900)
-                                            processingStep = 2
-                                            delay(900)
-                                            processingStep = 3
-                                            delay(900)
-                                            processingStep = 4
-                                            delay(600)
-                                            isProcessing = false
-                                            capturedPhotoUrl = "https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=600&auto=format&fit=crop"
-                                            showPublishPreviewScreen = true
-                                        }
+                                        showReplayVerificationModal = true
                                     } else {
                                         // Trigger live checks setup
                                         isLiveReadinessChecking = true
@@ -2242,6 +2453,43 @@ fun CameraScreen(
                     }
                 }
             }
+        }
+
+        // -------------------------------------------------------------
+        // REPLAY VERIFICATION & BACKGROUND UPLOAD QUEUE MODAL
+        // -------------------------------------------------------------
+        if (showReplayVerificationModal) {
+            ReplayVerificationModal(
+                replayImageUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800&auto=format&fit=crop",
+                venueName = "Truth Nightclub",
+                eventName = "Amapiano Fridays",
+                durationSeconds = videoDurationSeconds.coerceAtLeast(184),
+                totalWatchers = watcherCount,
+                ripplePointsEarned = 480,
+                onPublishReplay = { caption, destinations ->
+                    showReplayVerificationModal = false
+                    // Publish to Repositories
+                    MyCircleRepository.addStory(
+                        userName = "You",
+                        mediaUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800&auto=format&fit=crop",
+                        text = caption,
+                        type = "Live Replay"
+                    )
+                    FeedRepository.addMoment(
+                        username = "You",
+                        avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop",
+                        momentType = "REPLAY",
+                        mediaUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800&auto=format&fit=crop",
+                        captionOriginal = caption,
+                        locationName = "Truth Nightclub"
+                    )
+                    isUploadFinishedSuccess = true
+                    Toast.makeText(context, "Replay published across FOMO ecosystem! One Sun. Billion Eyes.", Toast.LENGTH_LONG).show()
+                },
+                onDiscard = {
+                    showReplayVerificationModal = false
+                }
+            )
         }
     }
 }

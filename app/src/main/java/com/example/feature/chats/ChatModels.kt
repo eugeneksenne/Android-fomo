@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -46,27 +47,16 @@ fun CallOverlay(
     imgUrl: String,
     onEndCall: () -> Unit
 ) {
-    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black.copy(alpha = 0.9f)) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            AsyncImage(model = imgUrl, contentDescription = null, modifier = Modifier.size(100.dp).clip(CircleShape))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Text(if (callType == CallType.VIDEO) "Video Call..." else "Voice Call...", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(40.dp))
-            Button(
-                onClick = onEndCall,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-            ) {
-                Icon(Icons.Default.CallEnd, contentDescription = null, tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("End Call", color = Color.White)
-            }
-        }
-    }
+    val session = FomoCallSession(
+        name = name,
+        imgUrl = imgUrl,
+        callType = if (callType == CallType.VIDEO) "VIDEO" else "VOICE",
+        initialState = FomoCallState.OUTGOING
+    )
+    FomoCallOverlay(
+        session = session,
+        onEndCall = onEndCall
+    )
 }
 
 @Composable
@@ -75,6 +65,7 @@ fun MessageActionSheet(
     onDismiss: () -> Unit,
     onReact: (String) -> Unit = {},
     onReply: () -> Unit = {},
+    onEdit: () -> Unit = {},
     onCopy: () -> Unit = {},
     onDelete: () -> Unit = {}
 ) {
@@ -100,6 +91,16 @@ fun MessageActionSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Reply to Message", color = Color.White)
+                }
+                if (message?.senderId == "me" && message.type == com.example.core.data.chat.RichMessageType.TEXT) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { onEdit(); onDismiss() }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Edit Message", color = Color.White)
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable { onCopy(); onDismiss() }.padding(vertical = 10.dp),

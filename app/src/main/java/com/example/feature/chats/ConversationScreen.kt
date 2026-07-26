@@ -116,6 +116,8 @@ fun ConversationScreen(
 
     // Message dispatch callback
     val handleSendMessage: (String, RichMessageType, Map<String, String>?, GroupPoll?) -> Unit = { text, type, metadata, poll ->
+        val newMsgId = "msg_${System.currentTimeMillis()}"
+        lastSentMsgId = newMsgId
         ChatRepository.sendMessage(
             conversationId = conversationId,
             type = type,
@@ -186,7 +188,9 @@ fun ConversationScreen(
                 if (showUndoBanner) {
                     UndoSendBanner(onUndo = {
                         showUndoBanner = false
-                        // Undo last message
+                        lastSentMsgId?.let { id ->
+                            ChatRepository.deleteMessage(conversationId, id)
+                        }
                     })
                 }
 
@@ -195,7 +199,7 @@ fun ConversationScreen(
                         conversationId = conversationId,
                         onSend = { text ->
                             if (editingMsg != null) {
-                                // Edit message
+                                ChatRepository.editMessage(conversationId, editingMsg!!.id, text)
                                 editingMsg = null
                             } else {
                                 handleSendMessage(text, RichMessageType.TEXT, null, null)
@@ -365,12 +369,21 @@ fun ConversationScreen(
                 )
             }
 
-            // Call Simulation Overlay
+            // Call Simulation Overlay (Full Screen UI matching Calls tab)
             activeCallType?.let { type ->
-                CallOverlay(
-                    name = chat.name,
-                    imgUrl = chat.imgUrl,
-                    callType = type,
+                val session = remember(type, chat) {
+                    FomoCallSession(
+                        name = chat.name,
+                        imgUrl = chat.imgUrl,
+                        callType = if (type == CallType.VIDEO) "VIDEO" else "VOICE",
+                        isGroup = chat.type == ChatType.GROUP,
+                        isNightGuard = chat.type == ChatType.NIGHTGUARD || chat.name.contains("NightGuard") || chat.name.contains("Safety"),
+                        isClubLobby = chat.type == ChatType.VENUE || chat.name.contains("Lobby") || chat.name.contains("VIP"),
+                        initialState = FomoCallState.OUTGOING
+                    )
+                }
+                FomoCallOverlay(
+                    session = session,
                     onEndCall = { activeCallType = null }
                 )
             }
@@ -528,7 +541,12 @@ fun ConversationScreen(
                         replyingToMsg = msg
                         activeDetailsMessage = null
                     },
+                    onEdit = {
+                        editingMsg = msg
+                        activeDetailsMessage = null
+                    },
                     onDelete = {
+                        ChatRepository.deleteMessage(conversationId, msg.id)
                         activeDetailsMessage = null
                     }
                 )
@@ -731,7 +749,7 @@ fun MessageComposer(
     onEmojiClick: () -> Unit,
     onRecordStart: () -> Unit
 ) {
-    var textState by remember { mutableStateOf("") }
+    var textState by remember(editingMsg) { mutableStateOf(editingMsg?.content ?: "") }
 
     // Draft autosave
     LaunchedEffect(textState) {
@@ -758,6 +776,29 @@ fun MessageComposer(
                     }
                     IconButton(onClick = onCancelReply, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            // Edit Preview Banner
+            if (editingMsg != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFFF9500).copy(alpha = 0.15f))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.width(3.dp).height(32.dp).background(Color(0xFFFF9500)))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Editing Message", color = Color(0xFFFF9500), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text(editingMsg.content, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = onCancelEdit, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel Edit", tint = Color.White, modifier = Modifier.size(16.dp))
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1013,7 +1054,11 @@ fun MessageBubble(
 
                 // Timestamp & Delivery State
                 Row(modifier = Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                    Text(message.timestamp, color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                    Text(
+                        text = if (message.isEdited) "${message.timestamp} • edited" else message.timestamp,
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 10.sp
+                    )
                     if (isMe) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(

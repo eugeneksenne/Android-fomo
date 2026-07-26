@@ -479,6 +479,22 @@ object ChatRepository {
         _state.update { it.copy(searchQuery = query) }
     }
 
+    // --- Active Conversation Selection ---
+    fun setActiveConversation(id: String?) {
+        _state.update { it.copy(activeConversationId = id) }
+        if (id != null) {
+            markConversationRead(id)
+        }
+    }
+
+    // --- Aliases for UI & ViewModel ---
+    fun togglePin(id: String) = togglePinConversation(id)
+    fun toggleMute(id: String) = toggleMuteConversation(id)
+    fun toggleArchive(id: String) = toggleArchiveConversation(id)
+    fun markAsRead(id: String) = markConversationRead(id)
+    fun addReaction(conversationId: String, messageId: String, emoji: String) = toggleReaction(conversationId, messageId, emoji)
+    fun createConversation(name: String, category: ChatCategory = ChatCategory.GROUPS) = createGroupConversation(name)
+
     // --- Swipe & Management Actions ---
     fun togglePinConversation(id: String) {
         _state.update { current ->
@@ -675,6 +691,62 @@ object ChatRepository {
             val updatedMap = current.activeMessages.toMutableMap()
             updatedMap[conversationId] = msgs
             current.copy(activeMessages = updatedMap)
+        }
+    }
+
+    // --- Message Editing & Deletion ---
+    fun editMessage(conversationId: String, messageId: String, newContent: String) {
+        _state.update { current ->
+            val msgs = current.activeMessages[conversationId]?.toMutableList() ?: return@update current
+            val idx = msgs.indexOfFirst { it.id == messageId }
+            if (idx == -1) return@update current
+
+            val target = msgs[idx]
+            msgs[idx] = target.copy(content = newContent, isEdited = true)
+
+            val updatedMap = current.activeMessages.toMutableMap()
+            updatedMap[conversationId] = msgs
+            current.copy(activeMessages = updatedMap)
+        }
+
+        firestore?.let { db ->
+            try {
+                db.collection("conversations").document(conversationId)
+                    .collection("messages").document(messageId)
+                    .update(mapOf("content" to newContent, "isEdited" to true))
+            } catch (e: Exception) {
+                Log.e("ChatRepository", "Error editing message in Firestore", e)
+            }
+        }
+    }
+
+    fun deleteMessage(conversationId: String, messageId: String) {
+        _state.update { current ->
+            val msgs = current.activeMessages[conversationId]?.toMutableList() ?: return@update current
+            val updatedMsgs = msgs.filterNot { it.id == messageId }
+
+            val updatedMap = current.activeMessages.toMutableMap()
+            updatedMap[conversationId] = updatedMsgs
+
+            val lastMsg = updatedMsgs.lastOrNull()
+            val updatedConvs = current.conversations.map { conv ->
+                if (conv.id == conversationId) {
+                    conv.copy(
+                        lastMessage = lastMsg?.let { if (it.type == RichMessageType.TEXT) it.content else "[${it.type.name.lowercase()}]" } ?: "No messages"
+                    )
+                } else conv
+            }
+
+            current.copy(activeMessages = updatedMap, conversations = updatedConvs)
+        }
+
+        firestore?.let { db ->
+            try {
+                db.collection("conversations").document(conversationId)
+                    .collection("messages").document(messageId).delete()
+            } catch (e: Exception) {
+                Log.e("ChatRepository", "Error deleting message in Firestore", e)
+            }
         }
     }
 
