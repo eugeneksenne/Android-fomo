@@ -227,13 +227,13 @@ Notes:
 | Ripple states (Idle→Viral) | ✅ Real | |
 | Verification badges | ✅ Real | |
 | Caption 3 lines + translation | ✅ Real | |
-| Friend Intelligence line | ⚠️ Static | Rendered from a stored string; not computed from real friend activity. |
+| Friend Intelligence line | ✅ **Real** | Derived from the user's actual circle (friends at the venue, then friends who engaged) and **omitted when there is nothing genuine to say**, per spec. Was a fixed string shown identically to every user regardless of whether they had any friends — fabricated social proof. |
 | Follow button hides once following | ⚠️ Partial | Toggles, but is not hidden for own content. |
 | Search (creators/venues/events/sounds/hashtags) | ⚠️ Partial | Filters loaded moments by text only. |
-| Feed ranking engine (FOMO Score) | ❌ Missing | Tabs filter; there is no ranking by velocity, watch completion, distance or trust. |
-| Watch completion / view telemetry | ❌ Missing | Nothing is measured, so ranking has no inputs. |
-| Creator analytics (14 metrics) | ❌ Cosmetic | Sheet exists; values are not real. |
-| Replay retention tiers (7/30/90/180 days) | ❌ Missing | No retention policy implemented. |
+| Feed ranking engine (FOMO Score) | ✅ **Built** | `FomoScore`: velocity, watch completion, engagement, friend activity, proximity, recency (6h half-life), live viewers and trust, reweighted per tab. Verified that a Moment going viral now outranks a 3-day-old post with 100k likes — the spec's central property. Counts are log-compressed so one metric can't ossify the feed. |
+| Watch completion / view telemetry | ✅ **Built** | `MomentTelemetry` records per-Moment view sessions, watch time and completion, plus venue/route/lobby/share interactions. Sessions close on page change and on leaving the feed, so time can't accrue off-screen. Mirrored to Firestore with atomic increments. |
+| Creator analytics | ✅ **Real** | Views, completion rate, average watch time, venue/route/lobby clicks and shares now come from measured telemetry. Views were previously `likesCount * 3 + 240`, completion the literal "94.2%" and route clicks the literal "84 clicks". Shows "No data yet" rather than inventing numbers. |
+| Replay retention tiers | ✅ **Built** | `ReplayRetention` implements 7/30/90/180-day tiers with pinning capped at 10 per creator. Pinned beats verified beats momentum beats duration. |
 | FlashList virtualization / preloading | ⚠️ Partial | `VerticalPager` virtualizes; no next-item preloading. |
 
 ---

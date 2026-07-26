@@ -346,6 +346,50 @@ object FeedRepository {
         return newMoment
     }
 
+    /**
+     * Builds the ranking signals for a Moment. Distance and age are parsed
+     * from the human-readable strings the model carries; telemetry supplies
+     * watch completion, which nothing measured before it existed.
+     */
+    fun signalsFor(moment: Moment, friendsEngaged: Int = 0): FomoScore.Signals {
+        val telemetry = MomentTelemetry.statsFor(moment.id)
+        return FomoScore.Signals(
+            velocityRipplesPerMin = moment.currentVelocity,
+            watchCompletion = telemetry.averageWatchCompletion,
+            likes = moment.likesCount,
+            comments = moment.comments.size,
+            shares = telemetry.shares,
+            saves = if (moment.isSaved) 1 else 0,
+            ripples = moment.ripplesCount,
+            friendsEngaged = friendsEngaged,
+            distanceMetres = FomoScore.parseDistanceMetres(moment.distanceText),
+            ageMinutes = FomoScore.parseAgeMinutes(moment.timeAgo),
+            liveViewers = moment.liveViewers,
+            isVerifiedAuthor = moment.isVerified,
+            isFollowing = moment.isFollowing,
+            isLiveNow = moment.momentType.equals("LIVE", ignoreCase = true),
+        )
+    }
+
+    /**
+     * Ranks Moments for a tab using the FOMO Score.
+     *
+     * Tabs previously only filtered and then rendered whatever order the list
+     * happened to be in, so a Moment going viral right now could sit below a
+     * stale one with more lifetime likes - the opposite of the spec.
+     */
+    fun rankedForTab(
+        tab: String,
+        moments: List<Moment>,
+        friendsEngagedBy: (Moment) -> Int = { 0 },
+    ): List<Moment> {
+        val weights = FomoScore.Weights.forTab(tab)
+        return moments
+            .map { it to FomoScore.score(signalsFor(it, friendsEngagedBy(it)), weights) }
+            .sortedByDescending { it.second }
+            .map { it.first }
+    }
+
     fun setActiveTab(tab: String) {
         _state.update { it.copy(activeTab = tab) }
     }

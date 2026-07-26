@@ -158,6 +158,17 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow write: if isUser(userId);
       }
+
+      // Aggregated watch telemetry feeding the FOMO Score and Creator
+      // Analytics. Any signed-in viewer may increment the counters; only the
+      // author reads them, so one creator cannot inspect another's numbers.
+      match /telemetry/{docId} {
+        allow read: if isSignedIn()
+                    && get(/databases/$(database)/documents/moments/$(momentId))
+                         .data.get('authorId', '') == request.auth.uid;
+        allow create, update: if isSignedIn();
+        allow delete: if false;
+      }
     }
 
     // ---------- stories (ephemeral, 24h) ----------
