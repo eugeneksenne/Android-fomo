@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import com.example.core.data.ConnectivityObserver
 import com.example.core.data.chat.*
 import com.example.core.data.story.*
 import com.example.core.data.NightGuardRepository
@@ -40,6 +42,17 @@ import com.example.core.data.NightGuardRepository
 fun ChatsScreen() {
     val repoState by ChatRepository.state.collectAsState()
     val storyState by StoryRepository.state.collectAsState()
+
+    // Drive offline state from REAL connectivity rather than the manual
+    // toolbar toggle that previously controlled it. Without this, losing
+    // signal was undetectable and messages were queued (then dropped) with no
+    // indication to the user.
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(appContext) {
+        ConnectivityObserver.observe(appContext).collect { online ->
+            ChatRepository.setNetworkStatus(online)
+        }
+    }
 
     // UI State local management
     var isCallsTabSelected by remember { mutableStateOf(false) }

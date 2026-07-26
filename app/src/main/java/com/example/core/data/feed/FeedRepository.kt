@@ -15,15 +15,67 @@ data class CommentItem(
     val time: String
 )
 
+/**
+ * A Moment Invitation: a *temporary* invitation to join the creator where they
+ * are right now. Per the spec this is not a venue information card - only its
+ * state changes as the invitation runs down.
+ *
+ * The previous model stored `initialHours`/`initialMinutes` and a mutable
+ * status string that nothing ever updated, so the card rendered a hardcoded
+ * "Available for 02:44:18" that never moved and a state that only changed via
+ * a debug button. Expiry is now an absolute timestamp, which is the only way a
+ * countdown can survive recomposition, backgrounding and process death.
+ */
 data class InvitationData(
     val venueName: String,
     val isVenueVerified: Boolean,
     val creatorName: String,
-    val initialHours: Int,
-    val initialMinutes: Int,
-    val venueClosedText: String = "Opens Friday 18:00",
-    var status: String = "ACTIVE" // ACTIVE, ENDED, CLOSED
-)
+    /** Wall-clock instant the invitation stops being active. */
+    val expiresAtMs: Long,
+    /** Set when the creator explicitly ends sharing before expiry. */
+    val endedEarlyAtMs: Long? = null,
+    /** Opening hours copy shown when the venue itself is closed. */
+    val venueClosedText: String = "",
+    /** True when venue intelligence reports the venue is currently shut. */
+    val isVenueClosed: Boolean = false,
+) {
+    /** Spec states 1-3, derived rather than stored so they cannot disagree. */
+    enum class State { ACTIVE, ENDED, VENUE_CLOSED }
+
+    fun stateAt(nowMs: Long = System.currentTimeMillis()): State = when {
+        isVenueClosed -> State.VENUE_CLOSED
+        endedEarlyAtMs != null -> State.ENDED
+        nowMs >= expiresAtMs -> State.ENDED
+        else -> State.ACTIVE
+    }
+
+    fun remainingMs(nowMs: Long = System.currentTimeMillis()): Long =
+        (expiresAtMs - nowMs).coerceAtLeast(0L)
+
+    /** "Until I Leave" invitations are modelled as a far-future expiry. */
+    val isOpenEnded: Boolean get() = expiresAtMs >= OPEN_ENDED_THRESHOLD_MS
+
+    companion object {
+        /** Durations the Camera offers when publishing an invitation. */
+        val DURATION_OPTIONS_MINUTES = listOf(15, 30, 60, 120)
+
+        /** Sentinel horizon representing "Until I Leave". */
+        const val OPEN_ENDED_THRESHOLD_MS = 1_000L * 60 * 60 * 24 * 365
+
+        fun expiryFor(durationMinutes: Int, nowMs: Long = System.currentTimeMillis()): Long =
+            nowMs + durationMinutes * 60_000L
+
+        /** Formats remaining time as MM:SS, or HH:MM:SS beyond an hour. */
+        fun formatRemaining(remainingMs: Long): String {
+            val total = remainingMs / 1000
+            val h = total / 3600
+            val m = (total % 3600) / 60
+            val sec = total % 60
+            return if (h > 0) String.format("%02d:%02d:%02d", h, m, sec)
+            else String.format("%02d:%02d", m, sec)
+        }
+    }
+}
 
 data class NightlifeStory(
     val id: String,
@@ -59,8 +111,25 @@ data class Moment(
     val currentVelocity: Float = 0.5f, // ripples per minute
     val isReplayProcessed: Boolean = false,
     val liveViewers: Int = 0,
-    val audioTrackName: String = "Original Nightlife Audio"
+    val audioTrackName: String = "Original Nightlife Audio",
+    // Publish settings chosen by the author on the Camera preview screen.
+    // These were previously collected in the UI and then discarded, so a
+    // moment marked "Private" was still published publicly with its venue
+    // attached. They are now carried on the model and enforced.
+    val visibility: String = VISIBILITY_PUBLIC, // Public | Followers | Private
+    val destinations: Set<String> = setOf(DESTINATION_FEED),
+    val isVenueShared: Boolean = true
 )
+
+const val VISIBILITY_PUBLIC = "Public"
+const val VISIBILITY_FOLLOWERS = "Followers"
+const val VISIBILITY_PRIVATE = "Private"
+
+const val DESTINATION_FEED = "Feed"
+const val DESTINATION_VENUE = "Venue"
+const val DESTINATION_CLUB_LOBBY = "Club Lobby"
+const val DESTINATION_EVENT = "Event Details"
+const val DESTINATION_PROFILE = "Profile Story"
 
 data class FeedState(
     val moments: List<Moment> = emptyList(),
@@ -90,7 +159,11 @@ object FeedRepository {
                     return@addSnapshotListener
                 }
                 if (snapshot.isEmpty) {
-                    seedFirestoreMoments(db)
+                    // Seeding demo content from the client is DEBUG-ONLY.
+                    // See ChatRepository for rationale.
+                    if (com.example.BuildConfig.DEBUG) {
+                        seedFirestoreMoments(db)
+                    }
                 } else {
                     val firestoreMoments = snapshot.documents.mapNotNull { doc ->
                         val id = doc.id
@@ -169,13 +242,28 @@ object FeedRepository {
         }
     }
 
+    /** Display name of the signed-in user, or a neutral fallback. */
+    private fun currentUserName(): String =
+        runCatching {
+            val u = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+            u?.displayName?.takeIf { it.isNotBlank() } ?: u?.email?.substringBefore("@")
+        }.getOrNull() ?: "You"
+
+    private fun currentUserAvatar(): String =
+        runCatching {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.photoUrl?.toString()
+        }.getOrNull().orEmpty()
+
     fun addMoment(
         username: String,
         avatarUrl: String,
         momentType: String,
         mediaUrl: String,
         captionOriginal: String,
-        locationName: String
+        locationName: String,
+        visibility: String = VISIBILITY_PUBLIC,
+        destinations: Set<String> = setOf(DESTINATION_FEED),
+        isVenueShared: Boolean = true
     ): Moment {
         val newMoment = Moment(
             id = "m_${System.currentTimeMillis()}",
@@ -188,8 +276,13 @@ object FeedRepository {
             captionOriginal = captionOriginal,
             captionTranslation = "",
             timeAgo = "Just now",
-            locationName = if (locationName.isBlank()) "Truth Nightclub" else locationName,
-            distanceText = "Right here",
+            // Respect the author's "Hide Venue" choice.
+            locationName = when {
+                !isVenueShared -> ""
+                locationName.isBlank() -> "Truth Nightclub"
+                else -> locationName
+            },
+            distanceText = if (isVenueShared) "Right here" else "",
             ripplesCount = 25,
             likesCount = 1,
             isLiked = true,
@@ -198,17 +291,39 @@ object FeedRepository {
             friendActivityText = "⚡ You captured this moment",
             invitation = null,
             momentumState = "Heating",
-            currentVelocity = 8.5f
+            currentVelocity = 8.5f,
+            visibility = visibility,
+            destinations = destinations,
+            isVenueShared = isVenueShared
         )
 
-        _state.update { current ->
-            current.copy(moments = listOf(newMoment) + current.moments)
+        // Only surface the moment in the local feed when the author actually
+        // chose to publish it there.
+        if (destinations.contains(DESTINATION_FEED)) {
+            _state.update { current ->
+                current.copy(moments = listOf(newMoment) + current.moments)
+            }
+        }
+
+        // A "Private" moment must never reach the shared `moments` collection.
+        // It stays local to this device until a per-user private collection
+        // exists. Publishing it here would make it world-readable.
+        if (visibility == VISIBILITY_PRIVATE) {
+            return newMoment
         }
 
         firestore?.let { db ->
             try {
                 val doc = mapOf(
                     "id" to newMoment.id,
+                    "visibility" to newMoment.visibility,
+                    "destinations" to newMoment.destinations.toList(),
+                    "isVenueShared" to newMoment.isVenueShared,
+                    "authorId" to (
+                        runCatching {
+                            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                        }.getOrNull() ?: ""
+                    ),
                     "username" to newMoment.username,
                     "avatarUrl" to newMoment.avatarUrl,
                     "isVerified" to newMoment.isVerified,
@@ -229,6 +344,50 @@ object FeedRepository {
         }
 
         return newMoment
+    }
+
+    /**
+     * Builds the ranking signals for a Moment. Distance and age are parsed
+     * from the human-readable strings the model carries; telemetry supplies
+     * watch completion, which nothing measured before it existed.
+     */
+    fun signalsFor(moment: Moment, friendsEngaged: Int = 0): FomoScore.Signals {
+        val telemetry = MomentTelemetry.statsFor(moment.id)
+        return FomoScore.Signals(
+            velocityRipplesPerMin = moment.currentVelocity,
+            watchCompletion = telemetry.averageWatchCompletion,
+            likes = moment.likesCount,
+            comments = moment.comments.size,
+            shares = telemetry.shares,
+            saves = if (moment.isSaved) 1 else 0,
+            ripples = moment.ripplesCount,
+            friendsEngaged = friendsEngaged,
+            distanceMetres = FomoScore.parseDistanceMetres(moment.distanceText),
+            ageMinutes = FomoScore.parseAgeMinutes(moment.timeAgo),
+            liveViewers = moment.liveViewers,
+            isVerifiedAuthor = moment.isVerified,
+            isFollowing = moment.isFollowing,
+            isLiveNow = moment.momentType.equals("LIVE", ignoreCase = true),
+        )
+    }
+
+    /**
+     * Ranks Moments for a tab using the FOMO Score.
+     *
+     * Tabs previously only filtered and then rendered whatever order the list
+     * happened to be in, so a Moment going viral right now could sit below a
+     * stale one with more lifetime likes - the opposite of the spec.
+     */
+    fun rankedForTab(
+        tab: String,
+        moments: List<Moment>,
+        friendsEngagedBy: (Moment) -> Int = { 0 },
+    ): List<Moment> {
+        val weights = FomoScore.Weights.forTab(tab)
+        return moments
+            .map { it to FomoScore.score(signalsFor(it, friendsEngagedBy(it)), weights) }
+            .sortedByDescending { it.second }
+            .map { it.first }
     }
 
     fun setActiveTab(tab: String) {
@@ -289,7 +448,19 @@ object FeedRepository {
         }
     }
 
-    fun addComment(momentId: String, text: String, author: String = "Me", avatar: String = "https://i.pravatar.cc/150?img=12") {
+    /**
+     * Adds a comment authored by the signed-in user.
+     *
+     * The author previously defaulted to the literal "Me" with a stock avatar,
+     * so every comment in a shared feed was attributed to the same fictional
+     * person regardless of who wrote it.
+     */
+    fun addComment(
+        momentId: String,
+        text: String,
+        author: String = currentUserName(),
+        avatar: String = currentUserAvatar(),
+    ) {
         _state.update { currentState ->
             val updatedMoments = currentState.moments.map { moment ->
                 if (moment.id == momentId) {
@@ -307,16 +478,29 @@ object FeedRepository {
         }
     }
     
-    fun setInvitationStatus(momentId: String, status: String) {
-        _state.update { currentState ->
-            val updatedMoments = currentState.moments.map { moment ->
-                if (moment.id == momentId && moment.invitation != null) {
-                    moment.copy(invitation = moment.invitation.copy(status = status))
-                } else moment
-            }
-            currentState.copy(moments = updatedMoments)
+    /**
+     * Ends an invitation early, per the spec's "creator manually ends sharing".
+     * State is derived from timestamps, so this records *when* rather than
+     * writing a status string that could contradict the clock.
+     */
+    fun endInvitation(momentId: String) {
+        _state.update { current ->
+            current.copy(
+                moments = current.moments.map { moment ->
+                    if (moment.id == momentId && moment.invitation != null &&
+                        moment.invitation.endedEarlyAtMs == null
+                    ) {
+                        moment.copy(
+                            invitation = moment.invitation.copy(
+                                endedEarlyAtMs = System.currentTimeMillis()
+                            )
+                        )
+                    } else moment
+                }
+            )
         }
     }
+
 
     fun markStorySeen(storyId: String) {
         _state.update { currentState ->
@@ -405,8 +589,7 @@ object FeedRepository {
                     venueName = "Cocoon Nightclub",
                     isVenueVerified = true,
                     creatorName = "Amanda",
-                    initialHours = 1,
-                    initialMinutes = 45
+                    expiresAtMs = InvitationData.expiryFor(durationMinutes = 105)
                 ),
                 momentumState = "Heating",
                 currentVelocity = 4.2f
@@ -458,9 +641,8 @@ object FeedRepository {
                     venueName = "Marble",
                     isVenueVerified = true,
                     creatorName = "Thabo",
-                    initialHours = 0,
-                    initialMinutes = 0,
-                    status = "ENDED"
+                    // Already expired -> renders State 2 (Invitation Ended).
+                    expiresAtMs = System.currentTimeMillis() - 60_000L
                 ),
                 momentumState = "Quiet",
                 currentVelocity = 0.1f

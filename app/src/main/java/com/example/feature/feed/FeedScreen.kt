@@ -44,6 +44,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import com.example.core.data.feed.*
+import com.example.core.data.MyCircleRepository
+import com.example.core.data.feed.FomoScore
+import com.example.core.data.feed.FriendIntelligence
+import com.example.core.data.feed.MomentTelemetry
+import com.example.core.data.moderation.ModerationRepository
+import com.example.feature.moderation.ModerationSheet
 
 // -------------------------------------------------------------------------
 // COMPOSABLE SCREEN
@@ -62,10 +68,21 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     var searchQuery by remember { mutableStateOf("") }
     var feedFilterTag by remember { mutableStateOf<String?>(null) }
     var commentSheetMoment by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
+    // Report / block / hide target. Play's UGC policy requires these controls.
+    var moderationTarget by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
+    // Feed audio starts muted, matching every major short-form video app.
+    var isFeedMuted by remember { mutableStateOf(true) }
+    val moderation = remember { ModerationRepository.getInstance(context) }
+    val moderationState by moderation.state.collectAsState()
     var analyticsSheetMoment by remember { mutableStateOf<com.example.core.data.feed.Moment?>(null) }
     var showPresenceDialog by remember { mutableStateOf(false) }
     var isSearchOpen by remember { mutableStateOf(false) }
-    var presenceSelectedPrivacy by remember { mutableStateOf("PUBLIC") }
+    // Spec: Private is the default for "Who's Here". This was initialised to
+    // "PUBLIC" while the dialog told the user "DEFAULT IS PRIVATE", so tapping
+    // Share Presence without changing anything would have broadcast the user's
+    // real-time location at a venue publicly. The value must also match one of
+    // the options listed below or nothing appears selected.
+    var presenceSelectedPrivacy by remember { mutableStateOf("Private (Default)") }
     var showCreateMomentSheet by remember { mutableStateOf(false) }
 
     // -------------------------------------------------------------------------
@@ -82,9 +99,15 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     // IN-MEMORY COMPREHENSIVE FEED DATASET
     // -------------------------------------------------------------------------
     val momentsList = feedState.moments
-    val filteredMoments by remember {
+    val filteredMoments by remember(moderationState) {
         derivedStateOf {
             momentsList.filter { moment ->
+                // Blocked authors and hidden posts must never render. Keyed on
+                // moderationState so blocking takes effect immediately.
+                val allowed = moment.id !in moderationState.hiddenMoments &&
+                    moderationState.blockedUsers.none { it.equals(moment.username, ignoreCase = true) }
+                if (!allowed) return@filter false
+
                 // Apply Search query & tag filter
                 val matchesSearch = if (searchQuery.isNotEmpty()) {
                     moment.username.contains(searchQuery, ignoreCase = true) ||
@@ -107,6 +130,14 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                 }
 
                 matchesSearch && matchesTag && matchesTab
+            }.let { visible ->
+                // Apply the FOMO Score. Tabs previously only filtered and then
+                // rendered whatever order the list happened to be in.
+                com.example.core.data.feed.FeedRepository.rankedForTab(
+                    tab = feedState.activeTab,
+                    moments = visible,
+                    friendsEngagedBy = { FriendIntelligence.friendsEngaged(it) }
+                )
             }
         }
     }
@@ -114,11 +145,17 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
     // Pager state synced to filtered moments size
     val pagerState = rememberPagerState(pageCount = { filteredMoments.size })
 
-    // Simulate global countdown clocks for all invitations
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1000L)
+    // Watch telemetry. The spec ranks on watch completion, but nothing
+    // measured that a Moment had even been seen.
+    LaunchedEffect(pagerState.currentPage, filteredMoments.size) {
+        filteredMoments.getOrNull(pagerState.currentPage)?.let {
+            MomentTelemetry.onMomentVisible(it.id)
         }
+    }
+    DisposableEffect(Unit) {
+        // Close the open session on exit, otherwise the last Moment accrues
+        // watch time while the user is elsewhere.
+        onDispose { MomentTelemetry.flush() }
     }
 
     // Base Scaffold
@@ -146,6 +183,11 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                         moment = moment,
                         onNavigateToLobby = onNavigateToLobby,
                         onCommentClick = { commentSheetMoment = moment },
+                        onMoreClick = { moderationTarget = moment },
+                        isActivePage = pagerState.currentPage == page,
+                        activeTab = feedState.activeTab,
+                        isMuted = isFeedMuted,
+                        onToggleMute = { isFeedMuted = !isFeedMuted },
                         onAnalyticsClick = { analyticsSheetMoment = moment },
                         onPresenceTrigger = { showPresenceDialog = true },
                         onFollowToggle = {
@@ -410,6 +452,45 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
             }
 
             // -------------------------------------------------------------------------
+            // BOTTOM SHEET: REPORT / BLOCK / HIDE  (Play UGC policy requirement)
+            // -------------------------------------------------------------------------
+            moderationTarget?.let { target ->
+                ModerationSheet(
+                    authorName = target.username,
+                    onDismiss = { moderationTarget = null },
+                    onHide = {
+                        moderation.hideMoment(target.id)
+                        moderationTarget = null
+                        Toast.makeText(context, "Post hidden.", Toast.LENGTH_SHORT).show()
+                    },
+                    onBlock = {
+                        moderation.blockUser(target.username)
+                        moderationTarget = null
+                        Toast.makeText(
+                            context,
+                            "${target.username} blocked. You won't see their posts.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    onReport = { reason, details, alsoBlock ->
+                        moderation.reportMoment(
+                            momentId = target.id,
+                            authorId = target.username,
+                            reason = reason,
+                            details = details,
+                            alsoBlockAuthor = alsoBlock
+                        )
+                        moderationTarget = null
+                        Toast.makeText(
+                            context,
+                            "Thanks - we'll review this post.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
+            }
+
+            // -------------------------------------------------------------------------
             // BOTTOM SHEET: CHATS & FEED COMMENTS INTERACTIVE LOGIC
             // -------------------------------------------------------------------------
             if (commentSheetMoment != null) {
@@ -572,8 +653,22 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            AnalyticsCardItem(title = "Rippling Velocity", value = "${analyticMoment.currentVelocity} r/min", badge = "🔥 High", modifier = Modifier.weight(1f))
-                            AnalyticsCardItem(title = "Total Views", value = "${analyticMoment.likesCount * 3 + 240}", badge = "+12%", modifier = Modifier.weight(1f))
+                            // Real measured telemetry. Views were previously
+                            // `likesCount * 3 + 240`, completion the literal
+                            // "94.2%" and route clicks the literal "84 clicks".
+                            val stats = MomentTelemetry.statsFor(analyticMoment.id)
+                            AnalyticsCardItem(
+                                title = "Ripple Velocity",
+                                value = String.format("%.1f r/min", analyticMoment.currentVelocity),
+                                badge = FomoScore.momentumLabel(analyticMoment.currentVelocity),
+                                modifier = Modifier.weight(1f)
+                            )
+                            AnalyticsCardItem(
+                                title = "Views",
+                                value = formatViewers(stats.views),
+                                badge = if (stats.views == 0) "No data yet" else "Measured",
+                                modifier = Modifier.weight(1f)
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -582,8 +677,41 @@ fun FeedScreen(onNavigateToLobby: (String) -> Unit = {}) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            AnalyticsCardItem(title = "Completion Rate", value = "94.2%", badge = "🎯 Target", modifier = Modifier.weight(1f))
-                            AnalyticsCardItem(title = "Route Navigation", value = "84 clicks", badge = "📍 Map", modifier = Modifier.weight(1f))
+                            val stats = MomentTelemetry.statsFor(analyticMoment.id)
+                            AnalyticsCardItem(
+                                title = "Completion Rate",
+                                value = if (stats.views == 0) "—" else String.format("%.0f%%", stats.completionRate * 100),
+                                badge = if (stats.views == 0) "No data yet" else "🎯 Measured",
+                                modifier = Modifier.weight(1f)
+                            )
+                            AnalyticsCardItem(
+                                title = "Avg Watch Time",
+                                value = if (stats.views == 0) "—" else String.format("%.1fs", stats.averageWatchMs / 1000f),
+                                badge = "⏱ Measured",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            val stats = MomentTelemetry.statsFor(analyticMoment.id)
+                            AnalyticsCardItem(title = "Venue Clicks", value = stats.venueClicks.toString(), badge = "📍 Venue", modifier = Modifier.weight(1f))
+                            AnalyticsCardItem(title = "Route Clicks", value = stats.routeClicks.toString(), badge = "🧭 Route", modifier = Modifier.weight(1f))
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            val stats = MomentTelemetry.statsFor(analyticMoment.id)
+                            AnalyticsCardItem(title = "Club Lobby Opens", value = stats.clubLobbyOpens.toString(), badge = "🏛 Lobby", modifier = Modifier.weight(1f))
+                            AnalyticsCardItem(title = "Shares", value = stats.shares.toString(), badge = "↗ Share", modifier = Modifier.weight(1f))
                         }
 
                         Spacer(modifier = Modifier.height(20.dp))
@@ -776,14 +904,36 @@ fun MomentPlayerItem(
     onFollowToggle: () -> Unit,
     onLikeToggle: () -> Unit,
     onRippleClick: () -> Unit,
-    onSaveToggle: () -> Unit
+    onSaveToggle: () -> Unit,
+    onMoreClick: () -> Unit,
+    /** True when this page is the one the user is looking at. */
+    isActivePage: Boolean = true,
+    /** Drives the tab-specific context line (Nearby shows distance). */
+    activeTab: String = "For You",
+    isMuted: Boolean = false,
+    onToggleMute: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isTranslated by remember { mutableStateOf(false) }
 
     // Invitation State Selector Cycle (Active, Ended, Closed)
-    var currentInviteState by remember { mutableStateOf(1) } // 1: Active, 2: Ended, 3: Closed
+    // Invitation state and countdown, derived from the invitation's absolute
+    // expiry. The card previously rendered a frozen "Available for 02:44:18"
+    // and only changed state via a debug button that shipped in the UI.
+    val circleFriends by MyCircleRepository.friendsState.collectAsState()
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(moment.invitation?.expiresAtMs) {
+        // Tick only while this invitation can still change state.
+        while (moment.invitation != null &&
+            moment.invitation!!.stateAt(nowMs) == InvitationData.State.ACTIVE
+        ) {
+            delay(1000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val inviteState = moment.invitation?.stateAt(nowMs) ?: InvitationData.State.ENDED
+    val remainingMs = moment.invitation?.remainingMs(nowMs) ?: 0L
 
     // Ripple click scale animation
     var isRippleWaveActive by remember { mutableStateOf(false) }
@@ -800,13 +950,26 @@ fun MomentPlayerItem(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // FULL-SCREEN VISUAL BACKGROUND
-        AsyncImage(
-            model = moment.mediaUrl,
-            contentDescription = "Moment Video/Photo Frame",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        // FULL-SCREEN MEDIA
+        //
+        // Video posts previously rendered through AsyncImage, so they showed a
+        // single frozen frame and never played - in a video-first vertical feed
+        // that is the core interaction.
+        if (isPlayableVideo(moment.momentType, moment.mediaUrl)) {
+            FeedVideoPlayer(
+                mediaUrl = moment.mediaUrl,
+                isActive = isActivePage,
+                isMuted = isMuted,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AsyncImage(
+                model = moment.mediaUrl,
+                contentDescription = "Moment photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // AMBIENT GRADIENT SHADOWS
         Box(
@@ -947,8 +1110,30 @@ fun MomentPlayerItem(
                 tint = Color.White,
                 label = "Share",
                 onClick = {
+                    MomentTelemetry.recordShare(moment.id)
                     Toast.makeText(context, "Copied Moment link to clipboard!", Toast.LENGTH_SHORT).show()
                 }
+            )
+
+            // Mute toggle, only meaningful on video posts.
+            if (isPlayableVideo(moment.momentType, moment.mediaUrl)) {
+                ActionRailItem(
+                    icon = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff
+                           else Icons.AutoMirrored.Filled.VolumeUp,
+                    tint = Color.White,
+                    label = if (isMuted) "Muted" else "Sound",
+                    onClick = onToggleMute
+                )
+            }
+
+            // Report / block / hide. Required by the Google Play User
+            // Generated Content policy; the feed previously had no way at all
+            // to report a post or block an author.
+            ActionRailItem(
+                icon = Icons.Default.MoreHoriz,
+                tint = Color.White,
+                label = "More",
+                onClick = onMoreClick
             )
         }
 
@@ -975,21 +1160,30 @@ fun MomentPlayerItem(
                 }
             }
 
-            // Friend Intelligence row
-            Row(
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = moment.friendActivityText,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            // Friend Intelligence row.
+            // Spec: "Displayed only when relevant." This rendered a fixed
+            // string baked into each Moment, shown identically to every user
+            // regardless of whether they had any friends - fabricated social
+            // proof. Now derived from the real circle, omitted when empty.
+            val friendLine = remember(moment.id, moment.comments.size, circleFriends) {
+                FriendIntelligence.lineFor(moment)
+            }
+            if (friendLine != null) {
+                Row(
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = friendLine,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             // User Info header with custom validation status
@@ -1040,12 +1234,58 @@ fun MomentPlayerItem(
                 }
             }
 
-            Text(
-                text = moment.timeAgo,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
+            // Context line. The spec defines a distinct form per tab:
+            //   For You / Following : "2h ago - Sandton"
+            //   Nearby              : "5m ago - 280m away"
+            //   Live                : "LIVE - 2.4K watching"
+            //   Replay              : "Replay - Ended 5m ago"
+            // Only `timeAgo` was rendered before, so location, distance and
+            // live viewer counts never appeared.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val type = moment.momentType.uppercase()
+                when {
+                    type == "LIVE" -> {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF2D55))
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = if (moment.liveViewers > 0)
+                                "LIVE • ${formatViewers(moment.liveViewers)} watching"
+                            else "LIVE",
+                            color = Color(0xFFFF2D55),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    type == "REPLAY" -> Text(
+                        text = "Replay • Ended ${moment.timeAgo}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    else -> Text(
+                        text = buildString {
+                            append(moment.timeAgo)
+                            // Nearby surfaces distance; other tabs the venue.
+                            val context = if (activeTab == "Nearby") moment.distanceText
+                                          else moment.locationName
+                            if (context.isNotBlank()) {
+                                append(" • ")
+                                append(context)
+                            }
+                        },
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
 
             // Caption supporting Translation toggle
             Column {
@@ -1122,29 +1362,14 @@ fun MomentPlayerItem(
                                 }
                             }
 
-                            // Interactive State switcher button inside HUD (For evaluation)
-                            Surface(
-                                color = Color.White.copy(alpha = 0.05f),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.clickable {
-                                    currentInviteState = if (currentInviteState == 3) 1 else currentInviteState + 1
-                                    Toast.makeText(context, "Evaluated State changed to State $currentInviteState", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Text(
-                                    "Invite State: $currentInviteState",
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 8.sp,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                )
-                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // State Renderings
-                        when (currentInviteState) {
-                            1 -> {
+                        // State Renderings, derived from the invitation's own
+                        // expiry rather than a debug counter.
+                        when (inviteState) {
+                            InvitationData.State.ACTIVE -> {
                                 // STATE 1: ACTIVE INVITATION
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF32D74B)))
@@ -1152,13 +1377,14 @@ fun MomentPlayerItem(
                                     Text("${inv.creatorName} is here now", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Text(
-                                    text = "Available for 02:44:18", // Countdown state
+                                    text = if (inv.isOpenEnded) "Available until they leave"
+                                           else "Available for ${InvitationData.formatRemaining(remainingMs)}",
                                     color = Color.White.copy(alpha = 0.6f),
                                     fontSize = 11.sp,
                                     modifier = Modifier.padding(start = 16.dp)
                                 )
                             }
-                            2 -> {
+                            InvitationData.State.ENDED -> {
                                 // STATE 2: INVITATION ENDED
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
@@ -1172,19 +1398,23 @@ fun MomentPlayerItem(
                                     modifier = Modifier.padding(start = 16.dp)
                                 )
                             }
-                            3 -> {
+                            InvitationData.State.VENUE_CLOSED -> {
                                 // STATE 3: VENUE CLOSED
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF2D55)))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Venue Closed", color = Color(0xFFFF2D55), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
-                                Text(
-                                    text = inv.venueClosedText,
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(start = 16.dp)
-                                )
+                                // Opening hours are optional; don't render an
+                                // empty line when venue intelligence has none.
+                                if (inv.venueClosedText.isNotBlank()) {
+                                    Text(
+                                        text = inv.venueClosedText,
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(start = 16.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -1193,6 +1423,8 @@ fun MomentPlayerItem(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = {
+                                    MomentTelemetry.recordClubLobbyOpen(moment.id)
+                                    MomentTelemetry.recordVenueClick(moment.id)
                                     onNavigateToLobby("lobby_${inv.venueName.lowercase().replace(" ", "_")}")
                                     Toast.makeText(context, "Opening ${inv.venueName} Lobby Highlights!", Toast.LENGTH_SHORT).show()
                                 },
@@ -1208,6 +1440,7 @@ fun MomentPlayerItem(
 
                             Button(
                                 onClick = {
+                                    MomentTelemetry.recordRouteClick(moment.id)
                                     Toast.makeText(context, "📍 Launching Maps route instructions for ${inv.venueName}!", Toast.LENGTH_SHORT).show()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
@@ -1225,6 +1458,13 @@ fun MomentPlayerItem(
             }
         }
     }
+}
+
+/** Formats a viewer count the way the spec shows it: 2400 -> "2.4K". */
+fun formatViewers(count: Int): String = when {
+    count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000f).replace(".0M", "M")
+    count >= 1_000 -> String.format("%.1fK", count / 1_000f).replace(".0K", "K")
+    else -> count.toString()
 }
 
 // -------------------------------------------------------------------------

@@ -1,21 +1,188 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# FOMO — R8 / ProGuard configuration for release builds.
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Release builds run with isMinifyEnabled=true and isShrinkResources=true.
+# These rules keep the reflection-dependent parts of the stack working.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep line numbers so Play Console / Crashlytics stack traces stay readable,
+# while hiding original source file names.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Annotations & generics are required by Moshi, Retrofit and kotlinx.serialization.
+-keepattributes Signature,InnerClasses,EnclosingMethod
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
+-keepattributes AnnotationDefault
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+##---------------------------------------------------------------------------
+## kotlinx.serialization — used for type-safe Navigation Compose routes.
+## If these are stripped, navigation breaks at runtime with a serializer error.
+##---------------------------------------------------------------------------
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**
+-keepclassmembers class kotlinx.serialization.json.** {
+    *** Companion;
+}
+-keepclasseswithmembers class kotlinx.serialization.json.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+# Keep every @Serializable class and its generated serializer.
+-keep,includedescriptorclasses class com.example.**$$serializer { *; }
+-keepclassmembers class com.example.** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep @kotlinx.serialization.Serializable class com.example.** { *; }
+
+# Navigation Compose route classes are resolved reflectively.
+-keep class com.example.core.navigation.** { *; }
+
+##---------------------------------------------------------------------------
+## Data models — deserialized from Firestore via reflection.
+##---------------------------------------------------------------------------
+-keep class com.example.core.data.** { *; }
+-keepclassmembers class com.example.core.data.** {
+    <init>();
+    <fields>;
+}
+
+##---------------------------------------------------------------------------
+## Firebase / Google Play Services
+##---------------------------------------------------------------------------
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
+# Firestore uses reflection for POJO (de)serialization.
+-keepclassmembers class * {
+    @com.google.firebase.firestore.PropertyName <methods>;
+    @com.google.firebase.firestore.PropertyName <fields>;
+}
+
+##---------------------------------------------------------------------------
+## Credential Manager / Google Identity (Google Sign-In)
+##---------------------------------------------------------------------------
+-keep class androidx.credentials.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-dontwarn androidx.credentials.**
+
+##---------------------------------------------------------------------------
+## Moshi
+##---------------------------------------------------------------------------
+-keep class com.squareup.moshi.** { *; }
+-keep interface com.squareup.moshi.** { *; }
+-keepclasseswithmembers class * {
+    @com.squareup.moshi.* <methods>;
+}
+-keep @com.squareup.moshi.JsonQualifier interface *
+-keepclassmembers @com.squareup.moshi.JsonClass class * extends java.lang.Enum {
+    <fields>;
+}
+-keep class **JsonAdapter { <init>(...); *; }
+-dontwarn com.squareup.moshi.**
+
+##---------------------------------------------------------------------------
+## Retrofit / OkHttp
+##---------------------------------------------------------------------------
+-keepattributes Exceptions
+-keep,allowobfuscation,allowshrinking interface retrofit2.Call
+-keep,allowobfuscation,allowshrinking class retrofit2.Response
+-keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
+-dontwarn retrofit2.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+
+##---------------------------------------------------------------------------
+## Room
+##---------------------------------------------------------------------------
+-keep class androidx.room.** { *; }
+-keep @androidx.room.Entity class * { *; }
+-dontwarn androidx.room.paging.**
+
+##---------------------------------------------------------------------------
+## Coil
+##---------------------------------------------------------------------------
+-dontwarn coil.**
+
+##---------------------------------------------------------------------------
+## WebView JavaScript bridge.
+## MapScreen exposes an "AndroidBridge" object to JavaScript. R8 would
+## otherwise rename/remove these methods and the map's marker taps would
+## silently stop working in release builds.
+##---------------------------------------------------------------------------
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keepattributes JavascriptInterface
+
+##---------------------------------------------------------------------------
+## Kotlin / Compose
+##---------------------------------------------------------------------------
+-dontwarn kotlin.**
+-keepclassmembers class **$WhenMappings {
+    <fields>;
+}
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+}
+
+##---------------------------------------------------------------------------
+## CameraX
+##---------------------------------------------------------------------------
+-keep class androidx.camera.** { *; }
+-keep interface androidx.camera.** { *; }
+-dontwarn androidx.camera.**
+# CameraX loads camera2 implementation classes reflectively via
+# CameraXConfig; stripping them yields "No camera provider" at runtime.
+-keep class androidx.camera.camera2.** { *; }
+-keep class androidx.camera.core.impl.** { *; }
+
+##---------------------------------------------------------------------------
+## Firebase Storage (media upload)
+##---------------------------------------------------------------------------
+-keep class com.google.firebase.storage.** { *; }
+-dontwarn com.google.firebase.storage.**
+
+##---------------------------------------------------------------------------
+## Media3 (ExoPlayer / Transformer / Effect)
+## Transformer resolves codecs, GL effect processors and renderer factories
+## reflectively. Stripping them makes Look baking fail only in release builds.
+##---------------------------------------------------------------------------
+-keep class androidx.media3.** { *; }
+-keep interface androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+-keepclassmembers class * implements androidx.media3.common.util.UnstableApi { *; }
+
+##---------------------------------------------------------------------------
+## WorkManager
+## Workers are instantiated by class name; obfuscating them yields
+## ClassNotFoundException when a queued upload is retried after a restart.
+##---------------------------------------------------------------------------
+-keep class * extends androidx.work.Worker { *; }
+-keep class * extends androidx.work.CoroutineWorker { *; }
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keep class androidx.work.impl.** { *; }
+-dontwarn androidx.work.**
+
+##---------------------------------------------------------------------------
+## AndroidX ExifInterface
+##---------------------------------------------------------------------------
+-keep class androidx.exifinterface.** { *; }
+-dontwarn androidx.exifinterface.**
+
+##---------------------------------------------------------------------------
+## Moderation
+## ReportReason is persisted to Firestore by enum name; obfuscating it would
+## make historical reports unreadable in the moderation console.
+##---------------------------------------------------------------------------
+-keepclassmembers enum com.example.core.data.moderation.** {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+    **[] $VALUES;
+    public *;
+}

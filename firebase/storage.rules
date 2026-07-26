@@ -1,0 +1,60 @@
+rules_version = '2';
+
+// FOMO — Cloud Storage Security Rules
+//
+// Deploy with:  firebase deploy --only storage
+//
+// Without a deployed ruleset, a Storage bucket in test mode allows any client
+// holding the (publicly extractable) API key to read and overwrite every file.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
+
+    // Captured moments: <uid>/<timestamp>.<ext>, written by MediaUploader.
+    match /moments/{userId}/{fileName} {
+      // Feed media is readable by any signed-in user.
+      allow read: if isSignedIn();
+
+      // Only the owner may upload, and only reasonably sized media.
+      allow create: if isOwner(userId)
+                    && (
+                         (isImage() && request.resource.size < 15 * 1024 * 1024)
+                         || (isVideo() && request.resource.size < 200 * 1024 * 1024)
+                       );
+
+      // Published media is immutable; deletes are allowed so users can remove
+      // their own content (required for data-deletion compliance).
+      allow update: if false;
+      allow delete: if isOwner(userId);
+    }
+
+    // Profile avatars.
+    match /avatars/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(userId)
+                   && isImage()
+                   && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Default deny.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
