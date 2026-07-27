@@ -142,11 +142,14 @@ fun TonightSection(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "See all",
+                            text = "See all →",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { onNavigateToPlansWorkspace() }
+                            modifier = Modifier.clickable {
+                                DiscoverAnalytics.seeAllClicked("Tonight")
+                                onNavigateToPlansWorkspace()
+                            }
                         )
                     }
                 }
@@ -666,7 +669,7 @@ fun MyMovesHubOverlay(
                             // PLAN SELECTION CHIPS
                             item {
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    items(tonightState.plans) { p ->
+                                    items(items = tonightState.plans, key = { it.id }) { p ->
                                         val isSel = p.id == activePlan?.id
                                         Surface(
                                             color = if (isSel) accentPurple else cardBg,
@@ -983,7 +986,7 @@ fun MyMovesHubOverlay(
                                 Text("REALTIME NIGHTLIFE SUGGESTIONS", color = Color.White.copy(0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
 
-                            items(tonightState.suggestions) { sug ->
+                            items(items = tonightState.suggestions, key = { it.id }) { sug ->
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(16.dp),
@@ -1023,7 +1026,7 @@ fun MyMovesHubOverlay(
                                         .padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(activePlan.chatMessages) { msg ->
+                                    items(items = activePlan.chatMessages, key = { it.id }) { msg ->
                                         if (msg.isSystem) {
                                             Surface(
                                                 color = Color.White.copy(alpha = 0.08f),
