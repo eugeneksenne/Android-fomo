@@ -13,8 +13,8 @@ class DiscoverArchitectureTest {
         val shell = File(discoverRoot, "DiscoverScreen.kt")
         assertTrue(shell.exists())
         assertTrue(
-            "DiscoverScreen.kt should stay a thin orchestration shell",
-            shell.readLines().size <= 360
+            "DiscoverScreen.kt should stay a thin orchestration shell now that overlay state lives in DiscoverOverlayState",
+            shell.readLines().size <= 220
         )
     }
 
@@ -48,7 +48,9 @@ class DiscoverArchitectureTest {
             "dialogs/FlashDropRouteDialog.kt",
             "dialogs/GlobalPlanContextSheet.kt",
             "dialogs/TonightPlanDialogs.kt",
-            "DiscoverAnalytics.kt"
+            "DiscoverAnalytics.kt",
+            "DiscoverOverlayState.kt",
+            "DiscoverOverlayHost.kt"
         )
 
         expected.forEach { relativePath ->
@@ -70,6 +72,24 @@ class DiscoverArchitectureTest {
         val source = File(discoverRoot, "DiscoverScreen.kt").readText()
         assertFalse(source.contains("NightGuardQuickBanner"))
         assertFalse(source.contains("CountryPackQuickBanner"))
+    }
+
+    @Test
+    fun discoverScreenDelegatesOverlaySelectionToDiscoverOverlayState() {
+        val source = File(discoverRoot, "DiscoverScreen.kt").readText()
+        assertFalse(
+            "DiscoverScreen.kt should not own overlay/dialog selection state directly; " +
+                "that belongs in DiscoverOverlayState",
+            source.contains("mutableStateOf")
+        )
+        assertTrue(
+            "DiscoverScreen.kt should obtain overlay state via rememberDiscoverOverlayState()",
+            source.contains("rememberDiscoverOverlayState()")
+        )
+        assertTrue(
+            "DiscoverScreen.kt should delegate overlay/dialog rendering to DiscoverOverlayHost",
+            source.contains("DiscoverOverlayHost(")
+        )
     }
 
     @Test

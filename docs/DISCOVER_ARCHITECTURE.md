@@ -6,7 +6,9 @@ The Discover feature is organized as a thin orchestration shell plus feature mod
 
 ```text
 feature/discover/
-  DiscoverScreen.kt              # Orchestration shell: state collection, section order, overlay state
+  DiscoverScreen.kt              # Orchestration shell: state collection, section order, section->intent wiring
+  DiscoverOverlayState.kt        # Single source of truth for overlay/dialog selection ("what's open right now")
+  DiscoverOverlayHost.kt         # Renders whatever DiscoverOverlayState currently holds + overlay analytics wrapper
   DiscoverAnalytics.kt           # UI analytics facade
   components/
     DiscoverTopBar.kt
@@ -47,16 +49,47 @@ The legacy `DiscoverSections.kt` monolith has been removed; its symbols now live
 
 ## Shell responsibilities
 
-`DiscoverScreen.kt` should remain below 360 lines and only handle:
+`DiscoverScreen.kt` should remain below 220 lines (down from the earlier 360-line ceiling, now that overlay/dialog selection state lives entirely in `DiscoverOverlayState`) and only handle:
 
 - collecting repository state;
 - initialising and observing `NetworkMonitor` (offline awareness);
 - rendering the 12-section ordering with stable `key` and `contentType` values;
-- maintaining overlay/dialog selection state;
+- wiring each section's intents (e.g. `onSeeAllClick`, `onVenueClick`) directly to
+  `DiscoverOverlayState` methods (`overlayState::openX`);
 - dispatching navigation callbacks;
-- wrapping full-screen overlays in `DiscoverOverlay` for analytics and enter transitions.
+- delegating overlay/dialog rendering to `DiscoverOverlayHost`.
+
+The shell does **not** own overlay/dialog selection state itself. That single
+source of truth lives in `DiscoverOverlayState` (a plain `remember`-backed
+class exposing `open*()` / `dismiss*()` intent functions and read-only
+`by mutableStateOf` properties). Before this existed, `DiscoverScreen` held a
+dozen independent `mutableStateOf` flags directly in the composable body,
+which made the shell hard to scan and easy to leave in an inconsistent state.
+Now sections just reference `overlayState::openVenuePreview`,
+`overlayState::openFlashDropsHub`, etc., as callback values, and
+`DiscoverOverlayHost` renders whichever overlay/dialog is currently selected.
 
 Business rules, card rendering, overlay UI and reusable loading/empty/error/offline states belong in feature modules.
+
+### `DiscoverOverlayState`
+
+`DiscoverOverlayState.kt` centralises every overlay/dialog selection value
+Discover can show: venue preview, My Circle hub, story viewer, Flash Drop
+claim/detail/route, the global plan sheet, Prep Rooms, Channels, Explore The
+City, the Flash Drops hub and the Smart Places hub. Each piece of state is a
+private-setter `mutableStateOf` paired with public `openX()` / `dismissX()`
+functions, plus a `dismissAll()` escape hatch. `rememberDiscoverOverlayState()`
+creates and remembers one instance per `DiscoverScreen` composition.
+
+### `DiscoverOverlayHost`
+
+`DiscoverOverlayHost.kt` is a pure function of `DiscoverOverlayState`: given
+the current state plus the repository-backed lists it needs (explore venues,
+stories, global flash drops) and the shell's navigation callbacks, it renders
+whichever overlay/dialog is currently selected. It also hosts the shared
+`DiscoverOverlay` wrapper used by every full-screen overlay for
+`discover_overlay_opened` / `discover_overlay_dismissed` analytics and the
+fade + slide enter transition.
 
 ## Section standard
 
@@ -102,7 +135,7 @@ Data-driven sections (`FlashDrops`, `Events`, `MyCircle`, `SmartPlaces`, `Explor
 Every full-screen overlay must:
 
 - handle the system back gesture with `BackHandler { onDismiss() }`;
-- be hosted through the shell's `DiscoverOverlay` wrapper, which emits `discover_overlay_opened` / `discover_overlay_dismissed` analytics and provides the shared fade + slide enter transition.
+- be hosted through the `DiscoverOverlay` wrapper in `DiscoverOverlayHost.kt`, which emits `discover_overlay_opened` / `discover_overlay_dismissed` analytics and provides the shared fade + slide enter transition.
 
 `AlertDialog`- and `ModalBottomSheet`-based surfaces (FlashDropClaimDialog, FlashDropRouteDialog, GlobalPlanContextSheet) rely on the platform's native back handling and dismiss animations.
 
@@ -122,7 +155,7 @@ Every full-screen overlay must:
 - `discover_see_all_clicked` — emitted by every `SectionHeader` action and the Explore City inline action;
 - `discover_card_opened` — Flash Drops, Events, My Circle stories, Smart Places, Explore City venues, Channels, Prep Rooms;
 - `discover_action_clicked` — Closing Soon claim entry;
-- `discover_overlay_opened` / `discover_overlay_dismissed` — emitted by the shell's `DiscoverOverlay` wrapper for every full-screen overlay.
+- `discover_overlay_opened` / `discover_overlay_dismissed` — emitted by `DiscoverOverlayHost`'s `DiscoverOverlay` wrapper for every full-screen overlay.
 
 Production builds can bridge the facade to Firebase Analytics, Segment or a backend endpoint from one object.
 
@@ -152,3 +185,7 @@ Production builds can bridge the facade to Firebase Analytics, Segment or a back
 `DiscoverSectionStatesTest` (Robolectric Compose) verifies the section state contract at the UI level: offline vs empty vs populated rendering for Flash Drops, Events, Smart Places and My Circle, plus the standard `SectionHeader` title/subtitle/`See all →` rendering.
 
 `ExploreTheCityTest` (Robolectric Compose + Roborazzi config) covers the Explore The City section and venue preview overlay interaction flow.
+
+`DiscoverOverlayStateTest` unit-tests `DiscoverOverlayState` directly (no Compose runtime needed beyond `Snapshot`): every `openX()`/`dismissX()` pair, mutual independence between overlay slots, and `dismissAll()`.
+
+`DiscoverSeeAllRoutingTest` (Robolectric Compose) is the behavioural counterpart to `DiscoverArchitectureTest`: it drives every section's "See all" (or equivalent primary) affordance against a real `DiscoverOverlayState` / navigation callback and asserts the *correct* destination opens — Closing Soon → Smart Places hub, Flash Drops → Flash Drops hub, My Circle → My Circle hub, Live Moments → My Circle hub (activity feed), Smart Places → Smart Places hub, Trending Now → Explore The City hub, Events → `onNavigateToEvents`, Explore The City → Explore The City hub, Channels → Channels overlay open flag, Prep Rooms → Prep Rooms overlay open flag, Tonight → `onNavigateToPlansWorkspace`.

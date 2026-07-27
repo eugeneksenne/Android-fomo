@@ -1,15 +1,18 @@
 # FOMO Progress
 
 ## Current Focus
-Discover screen — production hardening (module split complete)
+Discover screen — production hardening (module split complete, overlay-state consolidation complete)
 
 ## Completed So Far
 - Split the shared Discover UI out of the legacy `DiscoverSections.kt` monolith and **removed the monolith**.
-- Reduced `DiscoverScreen.kt` to a route shell and overlay orchestration (~300 lines, ceiling 360).
+- Reduced `DiscoverScreen.kt` to a route shell and overlay orchestration (~170 lines, ceiling 220).
+- Extracted overlay/dialog selection state into `DiscoverOverlayState` (single source of truth, replacing a dozen independent `mutableStateOf` flags) and overlay rendering into `DiscoverOverlayHost`.
 - Preserved the Discover section order from the current implementation.
 - Preserved the section-level `See all` callbacks for Discover modules.
 - Kept the hero section at the top of the Discover layout.
 - Kept the Discover overlays and preview flows wired to the existing navigation callbacks.
+- Added `DiscoverSeeAllRoutingTest` verifying every section's "See all" affordance routes to the correct destination.
+- Added `DiscoverOverlayStateTest` unit-testing `DiscoverOverlayState`'s open/dismiss/dismissAll contract and overlay-slot independence.
 
 ## Discover Refactor Checklist
 - [x] Extract shared Discover section composables into dedicated files.
@@ -36,6 +39,8 @@ Discover screen — production hardening (module split complete)
 - [x] Image preloading: `DiscoverImagePrefetcher` warms Coil caches for hero + first-viewport imagery.
 - [x] Architecture + analytics unit tests (JVM, no emulator required).
 - [x] Compose UI state tests (Robolectric) for offline / empty / populated section rendering.
+- [x] Consolidate overlay/dialog selection state in the shell into a single `DiscoverOverlayState` object.
+- [x] Add behavioural routing tests for every section's "See all" (or equivalent) affordance.
 
 ## Remaining / Deferred
 - Repository evolution from seeded `StateFlow<List<T>>` to richer states so sections can exercise `DiscoverLoadingSkeleton` / `DiscoverErrorState` in production paths.
