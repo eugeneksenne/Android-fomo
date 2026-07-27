@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -109,7 +113,14 @@ fun ChannelCard(
         modifier = Modifier
             .width(170.dp)
             .height(130.dp)
-            .clickable { onClick() }
+            .semantics {
+                contentDescription = "$title channel, $membersText"
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("channels", title.lowercase().replace(" ", "_"), "channel")
+                onClick()
+            }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             AsyncImage(
@@ -134,5 +145,3 @@ fun ChannelCard(
         }
     }
 }
-
-@Composable

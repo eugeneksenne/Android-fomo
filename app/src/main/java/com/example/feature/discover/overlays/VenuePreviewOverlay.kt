@@ -1,5 +1,6 @@
 package com.example.feature.discover
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -69,6 +70,7 @@ fun VenuePreviewOverlay(
     onNavigateToLobby: (String) -> Unit,
     onLikeToggle: (String) -> Unit
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
     val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val (statusText, statusColor, extraStatus) = getVenueStatus(venue, currentHour)

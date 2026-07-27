@@ -1,5 +1,6 @@
 package com.example.feature.discover
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -78,6 +79,7 @@ fun SmartPlacesHubOverlay(
     onNavigateToLobby: (String) -> Unit,
     onLikeToggle: (String) -> Unit
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedMood by remember { mutableStateOf("🔥 Tonight") }

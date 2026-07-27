@@ -1,5 +1,6 @@
 package com.example.feature.discover
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -69,6 +70,7 @@ fun FlashDropsHubOverlay(
     onOpenRoute: (com.example.core.data.FlashDrop) -> Unit,
     onClaimDrop: (String) -> Unit
 ) {
+    BackHandler { onDismiss() }
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("ALL") } // ALL, VENUE, EVENT, CREATOR, BRAND, MYSTERY
     var selectedStatus by remember { mutableStateOf("ALL") } // ALL, LIVE, ENDING_SOON, TRENDING, CLAIMED
@@ -560,6 +562,7 @@ fun FlashDropDetailOverlay(
     onOpenRoute: (com.example.core.data.FlashDrop) -> Unit,
     onClaimConfirm: (String) -> Unit
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
     var isHintRevealed by remember { mutableStateOf(false) }
 

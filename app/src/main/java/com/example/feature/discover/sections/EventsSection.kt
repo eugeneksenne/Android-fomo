@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -64,8 +68,10 @@ import coil.compose.AsyncImage
 @Composable
 fun EventsSection(
     events: List<com.example.core.data.Event>,
+    isOnline: Boolean = true,
     onNavigateToEvents: () -> Unit,
-    onNavigateToEventDetails: (String) -> Unit
+    onNavigateToEventDetails: (String) -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     Column {
         SectionHeader(
@@ -74,13 +80,16 @@ fun EventsSection(
             actionText = "See all",
             onActionClick = onNavigateToEvents
         )
-        if (events.isEmpty()) {
-            DiscoverEmptyState(
+        when {
+            events.isEmpty() && !isOnline -> DiscoverOfflineState(
+                message = "Reconnect to load tonight's events.",
+                onRetryClick = onRetry
+            )
+            events.isEmpty() -> DiscoverEmptyState(
                 title = "No events loaded",
                 message = "Refresh later to discover tonight's upcoming events."
             )
-        } else {
-            LazyRow(
+            else -> LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -99,7 +108,14 @@ fun EventCard(event: com.example.core.data.Event, onCardClick: () -> Unit) {
             .width(300.dp)
             .height(200.dp)
             .clip(RoundedCornerShape(20.dp))
-            .clickable { onCardClick() }
+            .semantics {
+                contentDescription = "${event.title} at ${event.venueName}. Event card."
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("events", event.id, "event")
+                onCardClick()
+            }
             .testTag("discover_event_card_${event.id}")
     ) {
         AsyncImage(

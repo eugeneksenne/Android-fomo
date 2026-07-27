@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -64,8 +68,10 @@ import coil.compose.AsyncImage
 @Composable
 fun MyCircleSection(
     stories: List<com.example.core.data.CircleStory>,
+    isOnline: Boolean = true,
     onSeeAllClick: () -> Unit,
-    onStoryClick: (Int) -> Unit
+    onStoryClick: (Int) -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     Column {
         SectionHeader(
@@ -74,6 +80,12 @@ fun MyCircleSection(
             actionText = "See all",
             onActionClick = onSeeAllClick
         )
+        if (stories.isEmpty() && !isOnline) {
+            DiscoverOfflineState(
+                message = "Reconnect to see where your circle is heading.",
+                onRetryClick = onRetry
+            )
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -154,7 +166,14 @@ fun StoryCircle(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clickable { onClick() }
+            .semantics {
+                contentDescription = "${story.userName}'s story"
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("my_circle", story.id, "story")
+                onClick()
+            }
             .testTag("story_circle_${story.userName.lowercase()}")
     ) {
         Box(

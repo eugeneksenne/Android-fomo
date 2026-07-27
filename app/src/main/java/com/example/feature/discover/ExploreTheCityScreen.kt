@@ -1,6 +1,7 @@
 package com.example.feature.discover
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -45,6 +46,7 @@ fun ExploreTheCityOverlay(
     onNavigateToLobby: (String) -> Unit = {},
     onLikeToggle: (String) -> Unit = {}
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
 
     // Modern Dark Theme Palette

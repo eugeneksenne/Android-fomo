@@ -1,5 +1,6 @@
 package com.example.feature.discover
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -69,6 +70,7 @@ fun MyCircleHubOverlay(
     onNavigateToLobby: (String) -> Unit,
     onNavigateToEventDetails: (String) -> Unit
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
     val stories by com.example.core.data.MyCircleRepository.storiesState.collectAsState()
     val activityItems by com.example.core.data.MyCircleRepository.activityItemsState.collectAsState()

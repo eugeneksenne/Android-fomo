@@ -1,5 +1,6 @@
 package com.example.feature.discover
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,6 +71,7 @@ fun ImmersiveStoryViewer(
 ) {
     var currentIndex by remember { mutableStateOf(initialIndex) }
     val currentStory = stories.getOrNull(currentIndex) ?: return
+    BackHandler { onDismiss() }
     val context = LocalContext.current
 
     remember(currentIndex) {
