@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -65,9 +69,11 @@ import coil.compose.AsyncImage
 @Composable
 fun ExploreTheCitySection(
     venues: List<com.example.core.data.ExploreVenue>,
+    isOnline: Boolean = true,
     onVenueClick: (com.example.core.data.ExploreVenue) -> Unit,
     onLikeToggle: (String) -> Unit,
-    onSeeAllClick: () -> Unit = {}
+    onSeeAllClick: () -> Unit = {},
+    onRetry: () -> Unit = {}
 ) {
     val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val timeCategory = remember(currentHour) {
@@ -239,7 +245,12 @@ fun ExploreTheCitySection(
             Spacer(modifier = Modifier.height(12.dp))
 
             // 4. Venue Cards List (Stage 1 Browse Cards)
-            if (filteredVenues.isEmpty()) {
+            if (filteredVenues.isEmpty() && !isOnline) {
+                DiscoverOfflineState(
+                    message = "Reconnect to browse venues in this world.",
+                    onRetryClick = onRetry
+                )
+            } else if (filteredVenues.isEmpty()) {
                 DiscoverEmptyState(
                     title = "No venues in this world yet",
                     message = "Try another category or refresh when more venues come online."
@@ -364,7 +375,14 @@ fun ExploreVenueCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         modifier = Modifier
             .width(280.dp)
-            .clickable { onCardClick() }
+            .semantics {
+                contentDescription = "${venue.name}, ${venue.subcategory} in ${venue.area}. Venue card."
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("explore_the_city", venue.id, "venue")
+                onCardClick()
+            }
             .testTag("venue_card_${venue.id}")
     ) {
         Column {
@@ -375,7 +393,7 @@ fun ExploreVenueCard(
             ) {
                 AsyncImage(
                     model = venue.imageUrl,
-                    contentDescription = venue.name,
+                    contentDescription = null, // parent card node carries the description
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )

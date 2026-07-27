@@ -1,6 +1,6 @@
 # Discover Architecture
 
-The Discover feature is now organized as a thin orchestration shell plus feature modules. All files remain in the `com.example.feature.discover` package so existing navigation and Compose tests can continue to reference public composables without migration churn.
+The Discover feature is organized as a thin orchestration shell plus feature modules. All files remain in the `com.example.feature.discover` package so existing navigation and Compose tests can continue to reference public composables without migration churn.
 
 ## Structure
 
@@ -30,60 +30,125 @@ feature/discover/
     VenuePreviewOverlay.kt
     StoryViewerOverlay.kt
     MyCircleOverlay.kt
-    FlashDropsOverlay.kt
+    FlashDropsOverlay.kt         # FlashDropsHubOverlay + FlashDropDetailOverlay
     SmartPlacesOverlay.kt
+    MyMovesHubOverlay.kt         # Tonight / My Moves hub
+    (ExploreTheCityScreen.kt, ChannelsScreen.kt and PrepRoomsScreen.kt co-locate
+     their hub overlays with their full-screen destinations)
   dialogs/
     FlashDropClaimDialog.kt
     FlashDropRouteDialog.kt
     SmartPlaceRouteDialog.kt
     GlobalPlanContextSheet.kt
+    TonightPlanDialogs.kt        # CreatePlanModalDialog + SplitFareDialog
 ```
+
+The legacy `DiscoverSections.kt` monolith has been removed; its symbols now live exclusively in the modules above. `DiscoverArchitectureTest` guards against its return.
 
 ## Shell responsibilities
 
 `DiscoverScreen.kt` should remain below 360 lines and only handle:
 
 - collecting repository state;
-- rendering the 12-section ordering;
+- initialising and observing `NetworkMonitor` (offline awareness);
+- rendering the 12-section ordering with stable `key` and `contentType` values;
 - maintaining overlay/dialog selection state;
 - dispatching navigation callbacks;
-- emitting high-level analytics hooks.
+- wrapping full-screen overlays in `DiscoverOverlay` for analytics and enter transitions.
 
 Business rules, card rendering, overlay UI and reusable loading/empty/error/offline states belong in feature modules.
 
 ## Section standard
 
-Each section should use the shared `SectionHeader` pattern:
+Carousel sections use the shared `SectionHeader` pattern:
 
 ```text
 Title                         See all →
 Subtitle
 ```
 
-`SectionHeader` emits `discover_section_viewed` and `discover_see_all_clicked` events through `DiscoverAnalytics`.
+`SectionHeader` emits `discover_section_viewed` and `discover_see_all_clicked` events through `DiscoverAnalytics`, appends the `→` affordance automatically, and exposes the action as an accessibility button.
 
-## Performance standards
+Exception: `TonightSection` is an intentionally branded "My Moves" panel with its own CTA header and is exempt from the shared header pattern (enforced in tests).
 
-- Main Discover `LazyColumn` uses stable `key` and `contentType` values for every section.
-- Horizontal lists use stable item keys where model IDs are available.
-- Expensive derived values should be wrapped in `remember` or `derivedStateOf`.
-- Avoid local business logic in composables when repository actions can own the state transition.
+"See all" destinations:
+
+| Section        | Destination                          |
+| -------------- | ------------------------------------ |
+| Closing Soon   | Smart Places hub (closing venues)    |
+| Flash Drops    | FlashDropsHubOverlay                 |
+| My Circle      | MyCircleHubOverlay                   |
+| Live Moments   | MyCircleHubOverlay (activity feed)   |
+| Smart Places   | SmartPlacesHubOverlay                |
+| Trending Now   | ExploreTheCityOverlay                |
+| Events         | EventsHomeScreen (navigation)        |
+| Explore City   | ExploreTheCityOverlay                |
+| Channels       | ChannelsOverlay                      |
+| Prep Rooms     | PrepRoomsOverlay                     |
+| Tonight        | Plans Workspace (header CTA)         |
 
 ## State standards
 
-Sections backed by dynamic data should support:
+Data-driven sections (`FlashDrops`, `Events`, `MyCircle`, `SmartPlaces`, `ExploreCity`) accept `isOnline: Boolean` and `onRetry: () -> Unit` from the shell and render, in order of precedence:
 
-- loading skeletons via `DiscoverLoadingSkeleton`;
-- empty states via `DiscoverEmptyState`;
-- error states via `DiscoverErrorState`;
-- offline states via `DiscoverOfflineState`.
+- `DiscoverOfflineState` when offline and no cached data;
+- `DiscoverEmptyState` when online with no data;
+- the live carousel otherwise.
 
-Current repositories mostly expose seeded `StateFlow<List<T>>` values, so full loading/error/offline wiring should be completed as repository states evolve from raw lists to richer state models.
+`DiscoverLoadingSkeleton` and `DiscoverErrorState` are available in `components/DiscoverStateContent.kt`. They activate when repositories evolve from seeded `StateFlow<List<T>>` values to richer state models carrying `isLoading` / error channels.
+
+## Overlay standards
+
+Every full-screen overlay must:
+
+- handle the system back gesture with `BackHandler { onDismiss() }`;
+- be hosted through the shell's `DiscoverOverlay` wrapper, which emits `discover_overlay_opened` / `discover_overlay_dismissed` analytics and provides the shared fade + slide enter transition.
+
+`AlertDialog`- and `ModalBottomSheet`-based surfaces (FlashDropClaimDialog, FlashDropRouteDialog, GlobalPlanContextSheet) rely on the platform's native back handling and dismiss animations.
+
+## Performance standards
+
+- The main Discover `LazyColumn` uses stable `key` and `contentType` values for every section item.
+- Data-driven horizontal lists use stable model-ID item keys (`FlashDrop.id`, `Event.id`, `ExploreVenue.id`, `CircleStory.id`).
+- Expensive derived values are wrapped in `remember` / `remember(key)` (e.g. venue match scores, time-of-day hero content).
+- `components/DiscoverImagePrefetcher.kt` warms Coil's memory/disk cache for the hero and first-viewport imagery (static cards + first venues/events/stories), so cards paint synchronously instead of popping in.
+- Business logic stays in repository actions; composables only dispatch and render.
+
+## Analytics standards
+
+`DiscoverAnalytics` is the single facade. Current coverage:
+
+- `discover_section_viewed` — emitted by every `SectionHeader`;
+- `discover_see_all_clicked` — emitted by every `SectionHeader` action and the Explore City inline action;
+- `discover_card_opened` — Flash Drops, Events, My Circle stories, Smart Places, Explore City venues, Channels, Prep Rooms;
+- `discover_action_clicked` — Closing Soon claim entry;
+- `discover_overlay_opened` / `discover_overlay_dismissed` — emitted by the shell's `DiscoverOverlay` wrapper for every full-screen overlay.
+
+Production builds can bridge the facade to Firebase Analytics, Segment or a backend endpoint from one object.
+
+## Accessibility standards
+
+- `SectionHeader` actions expose `contentDescription` + `Role.Button`.
+- Interactive cards (Flash Drops, Events, Smart Places, Explore City, Channels, Prep Rooms, story circles) expose merged `contentDescription`s and button roles.
+- Static showcase cards (Closing Soon, Live Moments, Trending) expose TalkBack descriptions.
+- State cards (`DiscoverSectionStateCard`) announce title and message.
 
 ## Testing
 
 `DiscoverArchitectureTest` enforces:
 
 - Discover shell line-count ceiling;
-- required module files;
-- removal of deprecated quick banners from `DiscoverScreen.kt`.
+- required module files (including the Tonight hub overlay and plan dialogs);
+- removal of the legacy `DiscoverSections.kt` monolith;
+- removal of deprecated quick banners from `DiscoverScreen.kt`;
+- stable keys + content types in the shell;
+- `BackHandler` presence in every full-screen overlay source;
+- offline/empty state support in data-driven sections;
+- `@Composable` root declarations in every section module;
+- the shared `SectionHeader` pattern in carousel sections.
+
+`DiscoverAnalyticsTest` smoke-tests the analytics facade contract.
+
+`DiscoverSectionStatesTest` (Robolectric Compose) verifies the section state contract at the UI level: offline vs empty vs populated rendering for Flash Drops, Events, Smart Places and My Circle, plus the standard `SectionHeader` title/subtitle/`See all →` rendering.
+
+`ExploreTheCityTest` (Robolectric Compose + Roborazzi config) covers the Explore The City section and venue preview overlay interaction flow.

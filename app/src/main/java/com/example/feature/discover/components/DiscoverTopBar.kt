@@ -62,6 +62,7 @@ import coil.compose.AsyncImage
 
 
 
+@Composable
 fun DiscoverTopBar(unreadCount: Int, onProfileClick: () -> Unit) {
     val context = LocalContext.current
     Row(

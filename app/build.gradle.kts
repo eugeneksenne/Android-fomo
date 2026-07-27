@@ -71,7 +71,14 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      // Allow JVM unit tests to call android.util.Log and other platform stubs
+      // (e.g. the DiscoverAnalytics facade) without mocking each method.
+      isReturnDefaultValues = true
+    }
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files

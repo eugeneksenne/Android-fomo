@@ -56,11 +56,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 
-
+@Composable
 fun PrepRoomsSection(onOpenClick: () -> Unit) {
     Column {
         SectionHeader(
@@ -103,11 +107,18 @@ fun PrepRoomCard(
             .width(150.dp)
             .height(190.dp)
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() }
+            .semantics {
+                contentDescription = "$categoryName prep room, $statusText"
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("prep_rooms", categoryName.lowercase().replace(" ", "_"), "prep_room")
+                onClick()
+            }
     ) {
         AsyncImage(
             model = imageModel,
-            contentDescription = categoryName,
+            contentDescription = null, // parent card node carries the description
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )

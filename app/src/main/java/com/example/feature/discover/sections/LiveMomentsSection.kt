@@ -56,6 +56,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -83,6 +85,7 @@ fun LiveMomentCard() {
             .width(160.dp)
             .height(240.dp)
             .clip(RoundedCornerShape(16.dp))
+            .semantics { contentDescription = "The Artistry is live right now" }
     ) {
         AsyncImage(
             model = "https://images.unsplash.com/photo-1545128485-c400e7702796?q=80&w=400&auto=format&fit=crop",

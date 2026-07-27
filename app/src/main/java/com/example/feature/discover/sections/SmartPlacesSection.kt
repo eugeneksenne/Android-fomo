@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -64,12 +68,21 @@ import coil.compose.AsyncImage
 @Composable
 fun SmartPlacesSection(
     venues: List<com.example.core.data.ExploreVenue> = emptyList(),
+    isOnline: Boolean = true,
     onSeeAllClick: () -> Unit = {},
-    onVenueClick: (com.example.core.data.ExploreVenue) -> Unit = {}
+    onVenueClick: (com.example.core.data.ExploreVenue) -> Unit = {},
+    onRetry: () -> Unit = {}
 ) {
     val displayVenues = if (venues.isNotEmpty()) venues.take(5) else emptyList()
     Column {
         SectionHeader("Smart Places", "Curated for your vibe tonight", "See all", onActionClick = onSeeAllClick)
+        if (displayVenues.isEmpty() && !isOnline) {
+            DiscoverOfflineState(
+                message = "Reconnect to refresh curated places for tonight.",
+                onRetryClick = onRetry
+            )
+            return@Column
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -132,12 +145,19 @@ fun SmartPlaceCard(
             .width(280.dp)
             .height(340.dp)
             .clip(RoundedCornerShape(20.dp))
-            .clickable { onClick() }
+            .semantics {
+                contentDescription = "$venueName, $matchScore. Smart place card."
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("smart_places", venueName.lowercase().replace(" ", "_"), "venue")
+                onClick()
+            }
             .testTag("smart_place_card_${venueName.lowercase().replace(" ", "_")}")
     ) {
         AsyncImage(
             model = imageUrl,
-            contentDescription = venueName,
+            contentDescription = null, // parent card node carries the description
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )

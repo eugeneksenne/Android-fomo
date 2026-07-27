@@ -1,6 +1,7 @@
 package com.example.feature.discover
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -147,6 +148,7 @@ fun PrepRoomsOverlay(
     onDismiss: () -> Unit,
     onNavigateToEventDetails: (String) -> Unit = {}
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 

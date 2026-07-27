@@ -56,6 +56,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -64,8 +68,10 @@ import coil.compose.AsyncImage
 @Composable
 fun FlashDropsSection(
     flashDrops: List<com.example.core.data.FlashDrop>,
+    isOnline: Boolean = true,
     onSeeAllClick: () -> Unit = {},
-    onClaimClick: (com.example.core.data.FlashDrop) -> Unit
+    onClaimClick: (com.example.core.data.FlashDrop) -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     Column {
         SectionHeader(
@@ -74,13 +80,13 @@ fun FlashDropsSection(
             actionText = "See all",
             onActionClick = onSeeAllClick
         )
-        if (flashDrops.isEmpty()) {
-            DiscoverEmptyState(
+        when {
+            flashDrops.isEmpty() && !isOnline -> DiscoverOfflineState(onRetryClick = onRetry)
+            flashDrops.isEmpty() -> DiscoverEmptyState(
                 title = "No Flash Drops right now",
                 message = "Check back soon for limited rewards near you."
             )
-        } else {
-            LazyRow(
+            else -> LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -115,7 +121,14 @@ fun FlashDropCard(
             .height(150.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(brush)
-            .clickable { onClaimClick() }
+            .semantics {
+                contentDescription = "${drop.title} at ${drop.venueName}. Flash drop card."
+                role = Role.Button
+            }
+            .clickable {
+                DiscoverAnalytics.cardOpened("flash_drops", drop.id, "flash_drop")
+                onClaimClick()
+            }
             .testTag("flash_drop_card_${drop.id}")
     ) {
         Column(

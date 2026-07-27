@@ -56,6 +56,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -81,7 +83,9 @@ fun ClosingSoonCard() {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.width(280.dp)
+        modifier = Modifier
+            .width(280.dp)
+            .semantics { contentDescription = "And Club, guest list closes in 28 minutes, 1.2 kilometres away" }
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -114,7 +118,7 @@ fun ClosingSoonCard() {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Button(
-                onClick = { },
+                onClick = { DiscoverAnalytics.actionClicked("claim_entry", "closing_soon_and_club") },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp)
