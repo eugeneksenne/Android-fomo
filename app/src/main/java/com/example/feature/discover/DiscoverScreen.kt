@@ -31,7 +31,7 @@ import com.example.core.data.notification.NotificationRepository
  *
  * All overlay/dialog *selection* state lives in [DiscoverOverlayState] so this
  * file stays a thin renderer: sections emit intents (`overlayState::openX`)
- * instead of the shell owning a dozen independent `mutableStateOf` flags.
+ * instead of the shell owning a dozen independent local state fields.
  *
  * All card rendering, business rules and state visuals live in the
  * `components/`, `sections/`, `overlays/` and `dialogs/` modules.
