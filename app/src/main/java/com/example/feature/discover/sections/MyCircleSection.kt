@@ -189,7 +189,7 @@ fun StoryCircle(
             ) {
                 AsyncImage(
                     model = story.userAvatar,
-                    contentDescription = "${story.userName}'s Story",
+                    contentDescription = null, // parent StoryCircle node carries the description
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()

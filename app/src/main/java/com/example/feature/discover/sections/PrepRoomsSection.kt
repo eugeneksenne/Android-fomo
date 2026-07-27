@@ -118,7 +118,7 @@ fun PrepRoomCard(
     ) {
         AsyncImage(
             model = imageModel,
-            contentDescription = categoryName,
+            contentDescription = null, // parent card node carries the description
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )

@@ -157,7 +157,7 @@ fun SmartPlaceCard(
     ) {
         AsyncImage(
             model = imageUrl,
-            contentDescription = venueName,
+            contentDescription = null, // parent card node carries the description
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )

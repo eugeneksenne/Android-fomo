@@ -120,7 +120,7 @@ fun EventCard(event: com.example.core.data.Event, onCardClick: () -> Unit) {
     ) {
         AsyncImage(
             model = event.posterUrl,
-            contentDescription = event.title,
+            contentDescription = null, // parent card node carries the description
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )

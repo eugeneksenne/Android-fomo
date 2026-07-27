@@ -55,7 +55,7 @@ fun DiscoverScreen(
     // Initialise the process-wide connectivity monitor once and observe it.
     LaunchedEffect(Unit) { NetworkMonitor.init(context) }
     val isOnline by NetworkMonitor.isOnline.collectAsState()
-    val retryConnectivity: () -> Unit = { NetworkMonitor.refresh(context) }
+    val retryConnectivity: () -> Unit = remember(context) { { NetworkMonitor.refresh(context) } }
 
     val eventsState by EventRepository.eventsState.collectAsState()
     val exploreVenues by VenueRepository.exploreVenuesState.collectAsState()

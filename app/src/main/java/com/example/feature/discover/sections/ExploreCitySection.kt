@@ -393,7 +393,7 @@ fun ExploreVenueCard(
             ) {
                 AsyncImage(
                     model = venue.imageUrl,
-                    contentDescription = venue.name,
+                    contentDescription = null, // parent card node carries the description
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
