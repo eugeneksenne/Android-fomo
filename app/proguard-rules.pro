@@ -1,21 +1,16 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# FOMO production shrinker rules.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep line numbers for actionable crash reports while still allowing obfuscation.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Kotlin metadata is needed by serialization/reflection-adjacent libraries used in the app.
+-keep class kotlin.Metadata { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Firebase/Play Services are generally covered by bundled consumer rules. Keep app models that
+# Firestore may deserialize reflectively when production data sync is enabled.
+-keepclassmembers class com.example.core.data.** { *; }
+-keepclassmembers class com.example.feature.**.*Model { *; }
+
+# Native Oboe bridge entry points.
+-keep class com.google.oboe.** { *; }

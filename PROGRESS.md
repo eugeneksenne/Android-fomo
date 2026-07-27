@@ -1,4 +1,84 @@
 
+---
+## BATCH 16: DISCOVER MODULARIZATION, PERFORMANCE KEYS & STATE FOUNDATION (STATUS: COMPLETED, LOCAL VERIFICATION BLOCKED BY JAVA RUNTIME)
+- **Scope**: Continued Discover production hardening by decomposing the 5,955-line `DiscoverScreen.kt` into dedicated components, sections, overlays and dialogs while preserving the current public package/API surface. Added analytics hooks, list stability improvements, reusable state UI, architecture documentation, and structural tests.
+- **Priority**: Highest (Discover maintainability and production readiness)
+
+### 1. SCOPE & INVENTORY OF WORK
+Files created & reorganized:
+- `/app/src/main/java/com/example/feature/discover/DiscoverScreen.kt` (reduced to 292-line orchestration shell)
+- `/app/src/main/java/com/example/feature/discover/DiscoverAnalytics.kt` (section/card/overlay analytics facade)
+- `/app/src/main/java/com/example/feature/discover/components/DiscoverTopBar.kt`
+- `/app/src/main/java/com/example/feature/discover/components/HeroSection.kt`
+- `/app/src/main/java/com/example/feature/discover/components/SectionHeader.kt`
+- `/app/src/main/java/com/example/feature/discover/components/SectionSpacer.kt`
+- `/app/src/main/java/com/example/feature/discover/components/DiscoverStateContent.kt`
+- `/app/src/main/java/com/example/feature/discover/sections/*Section.kt` for Closing Soon, Flash Drops, My Circle, Live Moments, Smart Places, Trending, Events, Explore City, Channels, Prep Rooms and Tonight
+- `/app/src/main/java/com/example/feature/discover/overlays/*Overlay.kt` for Venue Preview, Story Viewer, My Circle, Flash Drops and Smart Places
+- `/app/src/main/java/com/example/feature/discover/dialogs/*Dialog.kt` and `GlobalPlanContextSheet.kt`
+- `/app/src/test/java/com/example/feature/discover/DiscoverArchitectureTest.kt`
+- `/docs/DISCOVER_ARCHITECTURE.md`
+
+### 2. IMPLEMENTATION FIXES & ARCHITECTURAL HIGHLIGHTS
+1. **Feature module split**:
+   - Extracted the monolithic Discover implementation into the requested `components/`, `sections/`, `overlays/`, and `dialogs/` structure.
+   - Kept the Kotlin package stable (`com.example.feature.discover`) to avoid breaking existing navigation/tests while enabling physical modularity.
+2. **Performance foundation**:
+   - Added stable `key` and `contentType` values to the Discover `LazyColumn`.
+   - Added stable keys to dynamic `LazyRow`/`LazyColumn` item lists where model IDs exist.
+3. **State and accessibility foundation**:
+   - Added reusable loading, empty, error, and offline section state components.
+   - Wired empty states into dynamic Flash Drops, Events, and Explore City lists.
+   - Standardized SectionHeader analytics and TalkBack semantics for section actions.
+4. **Analytics hooks**:
+   - Added section viewed, see-all clicked, card opened, overlay opened/dismissed and action clicked events through `DiscoverAnalytics`.
+
+### 3. VERIFICATION EVIDENCE
+- Static architecture check: `DiscoverScreen.kt` reduced from 5,955 lines to 292 lines.
+- Static scan confirms removed quick banners are no longer present in Discover source.
+- Added `DiscoverArchitectureTest` to enforce module structure and shell size.
+- Attempted `./gradlew testDebugUnitTest --stacktrace`; sandbox remains blocked because `JAVA_HOME` is unset and no `java` executable exists.
+
+---
+
+---
+## BATCH 15: AUTH, FIREBASE CONFIGURATION & PERMISSION HARDENING (STATUS: COMPLETED, LOCAL VERIFICATION BLOCKED BY JAVA RUNTIME)
+- **Scope**: Removed hard-coded Firebase client configuration from source, centralized runtime Firebase bootstrap, stopped unsafe Google Sign-In anonymous fallback, added real Android location/notification runtime permission requests, expanded environment documentation, and added configuration validation tests.
+- **Priority**: Critical (Security, Play Store compliance, production launch readiness)
+
+### 1. SCOPE & INVENTORY OF WORK
+Files created & updated:
+- `/app/src/main/java/com/example/core/config/FirebaseRuntimeConfig.kt` (central Firebase bootstrap and configuration validation)
+- `/app/src/test/java/com/example/core/config/FirebaseRuntimeConfigTest.kt` (unit tests for config validation)
+- `/app/src/main/java/com/example/feature/auth/WelcomeAuthScreen.kt` (auth safety and runtime permission flows)
+- `/app/src/main/AndroidManifest.xml` (location and notification permissions, disabled app backup)
+- `/app/build.gradle.kts` (release minification and resource shrinking)
+- `/app/proguard-rules.pro` (production shrinker/crash-reporting keep rules)
+- `/app/src/main/res/xml/backup_rules.xml` and `/app/src/main/res/xml/data_extraction_rules.xml` (sensitive-data backup exclusions)
+- `/.env.example` (Firebase public client keys)
+- `/docs/PRODUCTION_READINESS.md` (release configuration and security notes)
+
+### 2. IMPLEMENTATION FIXES & ARCHITECTURAL HIGHLIGHTS
+1. **No hard-coded Firebase values in Kotlin source**:
+   - Firebase is initialized via `FirebaseRuntimeConfig`, preferring `google-services.json` and accepting CI/local `.env` values through `BuildConfig`.
+2. **Auth failure safety**:
+   - Google Sign-In now fails clearly when `default_web_client_id` or Firebase config is missing instead of silently signing users in anonymously.
+   - Email sign-in, sign-up, password reset, and guest sign-in guard against missing Firebase configuration.
+3. **Runtime permission compliance**:
+   - Location onboarding now launches real fine/coarse location permission requests.
+   - Notification onboarding now launches Android 13+ `POST_NOTIFICATIONS` permission requests.
+   - Denied permissions are non-blocking and surface user-readable recovery copy.
+4. **Release/privacy hardening**:
+   - Release builds now enable R8 minification and resource shrinking.
+   - App backup is disabled and backup/data-extraction XML excludes sensitive local data domains.
+
+### 3. VERIFICATION EVIDENCE
+- Static scan confirms prior hard-coded Firebase project values were removed from Kotlin source.
+- Added unit coverage for placeholder/blank config rejection and concrete config acceptance.
+- Attempted `./gradlew testDebugUnitTest --stacktrace`; sandbox is blocked because `JAVA_HOME` is unset and no `java` executable exists.
+
+---
+
 
 ---
 ## BATCH 12: STORIES SECTION & FULL-STACK EPHEMERAL MEDIA ENGINE (STATUS: COMPLETED & VERIFIED)
@@ -70,7 +150,7 @@ Files created & updated:
 ---
 
 ## BATCH 14: FULL-STACK FEED SCREEN & RIPPLE ENGINE (STATUS: COMPLETED & VERIFIED)
-- **Scope**: Re-architected the main social Feed screen to integrate with a centralized repository (`FeedRepository`) and backed it with a Supabase schema optimized for billion-dollar scale feed distribution, moment velocity (Ripple Engine), and venue invitations. 
+- **Scope**: Re-architected the main social Feed screen to integrate with a centralized repository (`FeedRepository`) and backed it with a Supabase schema optimized for billion-dollar scale feed distribution, moment velocity (Ripple Engine), and venue invitations.
 - **Priority**: High (Core app engagement experience)
 
 ### 1. SCOPE & INVENTORY OF WORK
