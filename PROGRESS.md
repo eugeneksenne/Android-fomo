@@ -33,13 +33,14 @@ Discover screen — production hardening (module split complete)
 - [x] Overlay open/dismiss analytics and shared fade + slide enter transition via the shell's `DiscoverOverlay` wrapper.
 - [x] Card-level analytics (`discover_card_opened`, `discover_action_clicked`) across sections.
 - [x] Accessibility: content descriptions + button roles on interactive cards, TalkBack labels on showcase cards and state cards.
+- [x] Image preloading: `DiscoverImagePrefetcher` warms Coil caches for hero + first-viewport imagery.
 - [x] Architecture + analytics unit tests (JVM, no emulator required).
+- [x] Compose UI state tests (Robolectric) for offline / empty / populated section rendering.
 
 ## Remaining / Deferred
 - Repository evolution from seeded `StateFlow<List<T>>` to richer states so sections can exercise `DiscoverLoadingSkeleton` / `DiscoverErrorState` in production paths.
-- Image preloading (Coil prefetcher) for hero + first-viewport cards.
-- Shared element transitions between cards and venue/event detail surfaces.
-- Compose UI tests (roborazzi is configured) for section rendering and navigation.
+- Shared element transitions between cards and venue/event detail surfaces (Compose `SharedTransitionLayout`; deferred — high-risk without an emulator build).
+- Compose UI screenshot (Roborazzi) recordings for the Discover shell.
 - Trimming the copy-pasted import blocks in extracted modules (warnings only; deferred to avoid behavioural risk without an emulator build).
 
 ## Notes

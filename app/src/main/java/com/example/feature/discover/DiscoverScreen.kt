@@ -65,6 +65,9 @@ fun DiscoverScreen(
     val notificationRepository = remember { NotificationRepository.getInstance(context) }
     val unreadCount by notificationRepository.unreadCount.collectAsState(initial = 0)
 
+    // Warm Coil caches for hero + first-viewport imagery.
+    DiscoverImagePrefetcher(venues = exploreVenues, events = eventsState, stories = storiesState)
+
     var selectedPreviewVenue by remember { mutableStateOf<com.example.core.data.ExploreVenue?>(null) }
     var isMyCircleHubOpen by remember { mutableStateOf(false) }
     var selectedStoryIndex by remember { mutableStateOf<Int?>(null) }

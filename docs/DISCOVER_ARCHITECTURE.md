@@ -111,6 +111,7 @@ Every full-screen overlay must:
 - The main Discover `LazyColumn` uses stable `key` and `contentType` values for every section item.
 - Data-driven horizontal lists use stable model-ID item keys (`FlashDrop.id`, `Event.id`, `ExploreVenue.id`, `CircleStory.id`).
 - Expensive derived values are wrapped in `remember` / `remember(key)` (e.g. venue match scores, time-of-day hero content).
+- `components/DiscoverImagePrefetcher.kt` warms Coil's memory/disk cache for the hero and first-viewport imagery (static cards + first venues/events/stories), so cards paint synchronously instead of popping in.
 - Business logic stays in repository actions; composables only dispatch and render.
 
 ## Analytics standards
@@ -147,3 +148,7 @@ Production builds can bridge the facade to Firebase Analytics, Segment or a back
 - the shared `SectionHeader` pattern in carousel sections.
 
 `DiscoverAnalyticsTest` smoke-tests the analytics facade contract.
+
+`DiscoverSectionStatesTest` (Robolectric Compose) verifies the section state contract at the UI level: offline vs empty vs populated rendering for Flash Drops, Events, Smart Places and My Circle, plus the standard `SectionHeader` title/subtitle/`See all →` rendering.
+
+`ExploreTheCityTest` (Robolectric Compose + Roborazzi config) covers the Explore The City section and venue preview overlay interaction flow.

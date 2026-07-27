@@ -26,6 +26,7 @@ class DiscoverArchitectureTest {
             "components/SectionHeader.kt",
             "components/SectionSpacer.kt",
             "components/DiscoverStateContent.kt",
+            "components/DiscoverImagePrefetcher.kt",
             "sections/ClosingSoonSection.kt",
             "sections/FlashDropsSection.kt",
             "sections/MyCircleSection.kt",
