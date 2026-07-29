@@ -8,6 +8,7 @@ plugins {
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.hilt.android)
 }
 
 android {
@@ -140,6 +141,10 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  implementation("io.socket:socket.io-client:2.1.0")
+  implementation(libs.hilt.android)
+  ksp(libs.hilt.compiler)
+  implementation(libs.androidx.hilt.navigation.compose)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
