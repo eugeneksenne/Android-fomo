@@ -1,0 +1,26 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node dist/server.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+
+# Environment variable defaults (override in Railway dashboard)
+# NODE_ENV=production
+# LOG_LEVEL=info
+# REDIS_ENABLED=true (if using Railway Redis plugin)
+# SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET must be set
+
+[[deploy.healthChecks]]
+path = "/health"
+interval = 30
+timeout = 5
+
+[[deploy.healthChecks]]
+path = "/ready"
+interval = 30
+timeout = 5
