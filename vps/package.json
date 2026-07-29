@@ -1,0 +1,65 @@
+{
+  "name": "fomo-signaling-server",
+  "version": "2.0.0",
+  "description": "Production-grade Socket.IO signaling server for FOMO - voice/video calls, presence, NightGuard, Club Lobby, live location",
+  "main": "dist/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "dev:debug": "tsx --inspect watch src/server.ts",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration --runInBand",
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx src/scripts/seed.ts",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "socket.io",
+    "webrtc",
+    "signaling",
+    "fastify",
+    "supabase",
+    "fomo",
+    "realtime",
+    "typescript"
+  ],
+  "author": "FOMO Team",
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/helmet": "^12.0.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "@opentelemetry/api": "^1.8.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.44.0",
+    "@opentelemetry/sdk-node": "^0.52.0",
+    "@opentelemetry/sdk-trace-base": "^1.25.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.0",
+    "fastify-plugin": "^4.5.1",
+    "jsonwebtoken": "^9.0.2",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.1",
+    "redis": "^4.7.0",
+    "socket.io": "^4.7.5",
+    "uuid": "^9.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.5.0",
+    "@types/uuid": "^9.0.8",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vitest": "^1.6.0"
+  }
+}
