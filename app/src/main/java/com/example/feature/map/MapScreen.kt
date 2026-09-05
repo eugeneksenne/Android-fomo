@@ -63,6 +63,12 @@ import com.example.feature.map.util.getVenueCoordinates
  * and all filtering/ranking/marker-generation logic lives in
  * `feature/map/util/`. See `docs/MAP_ARCHITECTURE.md`.
  */
+import androidx.compose.runtime.LaunchedEffect
+import com.example.feature.map.dialogs.RegionDownloadDialog
+import com.example.feature.map.engine.FomoMapEngine
+import com.example.feature.map.engine.toFomoVenue
+import com.example.feature.map.overlays.NightguardOverlay
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MapScreen(
@@ -73,7 +79,19 @@ fun MapScreen(
     val staticVenues by VenueRepository.exploreVenuesState.collectAsState()
     val friends by MyCircleRepository.friendsState.collectAsState()
 
+    val mapEngine = remember { FomoMapEngine() }
+    val mapEngineState by mapEngine.state.collectAsState()
+
     val state = rememberMapScreenState()
+
+    // Sync static venues to FOMO Map Engine
+    LaunchedEffect(staticVenues) {
+        val fomoVenues = staticVenues.mapIndexed { idx, venue ->
+            val coords = getVenueCoordinates(venue.id)
+            venue.toFomoVenue(coords.latitude, coords.longitude)
+        }
+        mapEngine.load(-26.146, 28.043, fomoVenues)
+    }
 
     // Custom session-added venues (from the Add Place dialog) layer on top
     // of the repository-backed venue list for the lifetime of this screen.
@@ -125,50 +143,81 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. HUD overlay elements (top-down flow).
-        Column(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(Color(0xFF0B0F19).copy(alpha = 0.95f), Color.Transparent)
+        // 2. Top HUD Overlay: Top Bar, Nightguard, Categories, Nearest Venue Card
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0B0F19).copy(alpha = 0.95f),
+                            Color(0xFF0B0F19).copy(alpha = 0.70f),
+                            Color.Transparent
                         )
                     )
-            ) {
-                MapTopBar(
-                    avatarUrl = "https://i.pravatar.cc/150?img=12",
-                    cityStatus = cityStatuses[state.cityStatusIndex],
-                    onCityStatusClick = {
-                        state.cycleCityStatus(cityStatuses.size)
-                        Toast.makeText(context, "Vibe Context: ${cityStatuses[state.cityStatusIndex]}", Toast.LENGTH_SHORT).show()
-                    },
-                    onSearchClick = state::openSearch,
-                    onNotificationsClick = state::openNotifications,
-                    onAvatarClick = state::openProfile
                 )
+        ) {
+            MapTopBar(
+                avatarUrl = "https://i.pravatar.cc/150?img=12",
+                fomoScore = 92,
+                onSearchClick = state::openSearch,
+                onNotificationsClick = state::openNotifications,
+                onAvatarClick = state::openProfile
+            )
 
-                CountryPackChips(
-                    selectedCategory = state.selectedCategory,
-                    onCategorySelected = { category ->
-                        state.selectCategory(category)
-                        MarkerRenderer.filterCategoryAndFetchOverpass(webViewRef, category)
-                    }
+            NightguardOverlay(
+                zones = mapEngineState.nightguardZones,
+                isNightguardActive = mapEngineState.isNightguardActive,
+                onToggleNightguard = mapEngine::toggleNightguard,
+                onSosClick = onNavigateToNightGuard
+            )
+
+            CountryPackChips(
+                selectedCategory = state.selectedCategory,
+                onCategorySelected = { category ->
+                    state.selectCategory(category)
+                    MarkerRenderer.filterCategoryAndFetchOverpass(webViewRef, category)
+                }
+            )
+
+            NearestVenueCard(
+                venue = nearestVenue,
+                categoryLabel = state.selectedCategory,
+                onNavigateToLobby = onNavigateToLobby,
+                onRouteClick = {
+                    MarkerRenderer.drawRouteToVenue(webViewRef, nearestVenue)
+                    Toast.makeText(context, "Routing to ${nearestVenue.name}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+
+        // 3. Floating action HUD positioned above the carousel on the right, below Nearest Venue Card
+        MapFloatingButtons(
+            onAddPlace = state::openAddPlace,
+            onSosClick = onNavigateToNightGuard,
+            onRecenter = { MarkerRenderer.recenterToCityDefault(webViewRef) },
+            onDownloadMapClick = mapEngine::openRegionDownloadManager,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 220.dp, end = 12.dp)
+        )
+
+        // 4. Bottom HUD Overlay: Venue Preview (when selected) + Nearby Venues Carousel
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0xFF0B0F19).copy(alpha = 0.85f),
+                            Color(0xFF0B0F19)
+                        )
+                    )
                 )
-
-                NearestVenueCard(
-                    venue = nearestVenue,
-                    categoryLabel = state.selectedCategory,
-                    onNavigateToLobby = onNavigateToLobby,
-                    onRouteClick = {
-                        MarkerRenderer.drawRouteToVenue(webViewRef, nearestVenue)
-                        Toast.makeText(context, "Simulating premium walking route to ${nearestVenue.name}", Toast.LENGTH_SHORT).show()
-                    }
-                )
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
+        ) {
             VenuePreviewOverlay(
                 selectedItem = state.selectedMapItem,
                 onNavigateToLobby = onNavigateToLobby,
@@ -200,25 +249,6 @@ fun MapScreen(
                 }
             )
         }
-
-        // 3. Floating action HUD.
-        MapFloatingButtons(
-            isHeatmapEnabled = state.isHeatmapEnabled,
-            onQueryOverpass = {
-                Toast.makeText(context, "Querying OpenStreetMap Overpass API...", Toast.LENGTH_SHORT).show()
-                MarkerRenderer.fetchOverpassPOIs(webViewRef, state.selectedCategory)
-            },
-            onAddPlace = state::openAddPlace,
-            onSosClick = onNavigateToNightGuard,
-            onToggleHeatmap = {
-                state.toggleHeatmap()
-                MarkerRenderer.toggleHeatmap(webViewRef, state.isHeatmapEnabled)
-            },
-            onRecenter = { MarkerRenderer.recenterToCityDefault(webViewRef) },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 295.dp, end = 16.dp)
-        )
 
         // --- Dialogs & overlays ---
 
@@ -260,6 +290,14 @@ fun MapScreen(
 
         if (state.isProfileOpen) {
             UserProfileOverlayDialog(onClose = state::closeProfile)
+        }
+
+        if (mapEngineState.isRegionDownloadOpen) {
+            RegionDownloadDialog(
+                offlineMapEngine = mapEngine.offlineMapEngine,
+                currentMode = mapEngineState.mode,
+                onClose = mapEngine::closeRegionDownloadManager
+            )
         }
 
         WebsiteViewer(

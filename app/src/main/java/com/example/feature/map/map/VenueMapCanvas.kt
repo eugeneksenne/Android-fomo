@@ -41,10 +41,24 @@ fun VenueMapCanvas(
     onWebViewReady: (WebView) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val html = remember(venues, friends) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val leafletCss = remember {
+        runCatching {
+            context.assets.open("leaflet/leaflet.css").bufferedReader().use { it.readText() }
+        }.getOrNull() ?: ""
+    }
+    val leafletJs = remember {
+        runCatching {
+            context.assets.open("leaflet/leaflet.js").bufferedReader().use { it.readText() }
+        }.getOrNull() ?: ""
+    }
+
+    val html = remember(venues, friends, leafletCss, leafletJs) {
         buildLeafletHtml(
             venueMarkersScript = MarkerGenerator.buildVenueMarkersScript(venues),
-            friendMarkersScript = MarkerGenerator.buildFriendMarkersScript(friends)
+            friendMarkersScript = MarkerGenerator.buildFriendMarkersScript(friends),
+            inlinedCss = leafletCss,
+            inlinedJs = leafletJs
         )
     }
 

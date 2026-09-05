@@ -18,6 +18,7 @@ class RealtimeRepository(
 
     suspend fun connect(): Result<Unit> {
         return try {
+            com.google.firebase.FirebaseApp.getInstance()
             val user = FirebaseAuth.getInstance().currentUser
                 ?: return Result.failure(Exception("No Firebase user"))
             val tokenResult = user.getIdToken(true).await()

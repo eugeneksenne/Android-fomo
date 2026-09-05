@@ -1,18 +1,10 @@
 package com.example.feature.map.cards
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -27,14 +19,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.feature.map.util.VenueActionLabels
 
-/**
- * The two-button action row at the bottom of [NearestVenueCard]: the
- * category-adaptive primary action (Club Lobby / Event Lobby / Reserve /
- * Watch / Website) and the "Route" button.
- *
- * Extracted verbatim from `MapScreen.kt`'s inline `NearestVenueCard` action
- * row.
- */
 @Composable
 internal fun NearestVenueActionRow(
     normalizedCategory: String,
@@ -43,40 +27,40 @@ internal fun NearestVenueActionRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Action 1: Club Lobby / Website with dual subtitle labels
+        // Action 1: Club Lobby button (Outlined dark purple container)
         Surface(
             onClick = onPrimaryActionClick,
-            color = Color(0xFF1E1430),
-            border = BorderStroke(1.dp, Color(0xFFC026D3).copy(alpha = 0.5f)),
-            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF201638),
+            border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.6f)),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
-                .weight(1.2f)
-                .height(40.dp)
+                .weight(1.1f)
+                .height(48.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.People,
                     contentDescription = null,
-                    tint = Color(0xFFD946EF),
-                    modifier = Modifier.size(14.dp)
+                    tint = Color(0xFFC084FC),
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Column {
                     Text(
                         text = VenueActionLabels.primaryActionTitle(normalizedCategory),
                         color = Color.White,
-                        fontSize = 10.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = VenueActionLabels.primaryActionSubtitle(normalizedCategory),
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 6.sp,
+                        text = "Photos, Events & More",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -84,37 +68,37 @@ internal fun NearestVenueActionRow(
             }
         }
 
-        // Action 2: Route button
+        // Action 2: Route button (Bright solid purple container)
         Surface(
             onClick = onRouteClick,
-            color = Color(0xFFC026D3),
-            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF8B5CF6),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .weight(1f)
-                .height(40.dp)
+                .height(48.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Navigation,
+                    imageVector = Icons.Default.NorthEast,
                     contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(14.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Column {
                     Text(
                         text = "Route",
-                        color = Color.Black,
-                        fontSize = 10.sp,
+                        color = Color.White,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "Get Directions",
-                        color = Color.Black.copy(alpha = 0.7f),
-                        fontSize = 6.sp,
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -122,3 +106,4 @@ internal fun NearestVenueActionRow(
         }
     }
 }
+

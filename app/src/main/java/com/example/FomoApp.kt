@@ -70,12 +70,13 @@ fun FomoApp() {
     val navController = rememberNavController()
     val currentUser = androidx.compose.runtime.remember {
         try {
+            com.google.firebase.FirebaseApp.getInstance()
             com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
     }
-    val startDestinationRoute: Any = if (currentUser != null) DiscoverRoute else com.example.core.navigation.WelcomeRoute
+    val startDestinationRoute: Any = DiscoverRoute
 
     Scaffold(
         bottomBar = {
@@ -181,7 +182,7 @@ fun FomoApp() {
                         } catch (e: Exception) {
                             e.printStackTrace()
                         }
-                        navController.navigate(com.example.core.navigation.WelcomeRoute) {
+                        navController.navigate(DiscoverRoute) {
                             popUpTo(0) { inclusive = true }
                         }
                     }

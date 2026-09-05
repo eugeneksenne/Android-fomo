@@ -837,8 +837,9 @@ fun ProfileScreen(onBackClick: () -> Unit, onSettingsClick: () -> Unit = {}) {
 fun HeroSection() {
     val currentUser = remember {
         try {
+            com.google.firebase.FirebaseApp.getInstance()
             com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
     }

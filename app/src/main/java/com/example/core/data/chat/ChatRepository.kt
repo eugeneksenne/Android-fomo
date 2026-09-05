@@ -183,6 +183,7 @@ object ChatRepository {
 
     fun initFirebaseSync() {
         try {
+            com.google.firebase.FirebaseApp.getInstance()
             val db = FirebaseFirestore.getInstance()
             firestore = db
 
@@ -235,8 +236,8 @@ object ChatRepository {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e("ChatRepository", "Firestore init skipped or unavailable", e)
+        } catch (e: Throwable) {
+            Log.w("ChatRepository", "Firestore init skipped or unavailable: ${e.message}")
         }
     }
 

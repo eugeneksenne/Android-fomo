@@ -1,6 +1,7 @@
 package com.example.core.data.realtime
 
 import android.util.Log
+import io.socket.client.Ack
 import io.socket.client.IO
 import io.socket.client.Socket
 import org.json.JSONObject
@@ -278,9 +279,9 @@ class FomoSocketManager private constructor() {
 
     // Chat
     fun joinChat(chatId: String, callback: ((JSONObject?) -> Unit)? = null) {
-        socket?.emit("chat:join", JSONObject(mapOf("chatId" to chatId))) { args ->
+        socket?.emit("chat:join", arrayOf<Any>(JSONObject(mapOf("chatId" to chatId))), Ack { args ->
             callback?.invoke(args.getOrNull(0) as? JSONObject)
-        }
+        })
     }
 
     fun sendChatMessage(chatId: String, text: String, type: String = "TEXT") {
@@ -352,22 +353,24 @@ class FomoSocketManager private constructor() {
 
     // Live
     fun createLive(venueId: String?, venueName: String?, title: String, callback: ((JSONObject?) -> Unit)? = null) {
-        socket?.emit("live:create", JSONObject().apply {
+        val payload = JSONObject().apply {
             put("venueId", venueId)
             put("venueName", venueName)
             put("title", title)
-        }) { args ->
-            callback?.invoke(args.getOrNull(0) as? JSONObject)
         }
+        socket?.emit("live:create", arrayOf<Any>(payload), Ack { args ->
+            callback?.invoke(args.getOrNull(0) as? JSONObject)
+        })
     }
 
     fun joinLive(roomId: String? = null, venueId: String? = null, callback: ((JSONObject?) -> Unit)? = null) {
-        socket?.emit("live:join", JSONObject().apply {
+        val payload = JSONObject().apply {
             if (roomId != null) put("roomId", roomId)
             if (venueId != null) put("venueId", venueId)
-        }) { args ->
-            callback?.invoke(args.getOrNull(0) as? JSONObject)
         }
+        socket?.emit("live:join", arrayOf<Any>(payload), Ack { args ->
+            callback?.invoke(args.getOrNull(0) as? JSONObject)
+        })
     }
 
     fun sendLiveComment(roomId: String, text: String) {

@@ -35,11 +35,30 @@ fun WebViewMap(
     AndroidView(
         factory = { ctx ->
             WebView(ctx).apply {
-                webViewClient = WebViewClient()
+                setBackgroundColor(android.graphics.Color.parseColor("#0B0F19"))
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
+                    databaseEnabled = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    cacheMode = WebSettings.LOAD_DEFAULT
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 FomoOSM/1.0"
+                    useWideViewPort = true
+                    loadWithOverviewMode = true
+                }
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(cm: android.webkit.ConsoleMessage?): Boolean {
+                        android.util.Log.d("FomoOSMMap", "${cm?.message()} -- line ${cm?.lineNumber()}")
+                        return true
+                    }
+                }
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        onWebViewReady(this@apply)
+                    }
                 }
                 addJavascriptInterface(
                     object {

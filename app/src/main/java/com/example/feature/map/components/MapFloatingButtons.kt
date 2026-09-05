@@ -1,117 +1,110 @@
 package com.example.feature.map.components
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.outlined.LocalFireDepartment
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
-/**
- * The Map screen's stacked floating action buttons: live Overpass POI query,
- * Add Place, SOS/NightGuard, heatmap toggle, and recenter.
- *
- * Extracted verbatim from `MapScreen.kt`'s inline `Column` of
- * `FloatingActionButton`s at the bottom-end of the screen - same colors,
- * borders, icons and content descriptions, same stacking order. Toast
- * side-effects and the actual `evaluateJavascript` calls now live with the
- * caller ([com.example.feature.map.MapScreen] /
- * [com.example.feature.map.map.MarkerRenderer]) since this component has no
- * knowledge of the `WebView` or `MapScreenState`.
- */
 @Composable
 fun MapFloatingButtons(
-    isHeatmapEnabled: Boolean,
-    onQueryOverpass: () -> Unit,
     onAddPlace: () -> Unit,
     onSosClick: () -> Unit,
-    onToggleHeatmap: () -> Unit,
     onRecenter: () -> Unit,
+    onDownloadMapClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+    Surface(
+        color = Color(0xFF0D111D).copy(alpha = 0.95f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.width(68.dp)
     ) {
-        // Live Overpass API OSM POIs button
-        FloatingActionButton(
-            onClick = onQueryOverpass,
-            containerColor = Color(0xFF0F1524),
-            contentColor = Color(0xFF76FF03),
-            modifier = Modifier
-                .size(48.dp)
-                .border(1.5.dp, Color(0xFF76FF03), CircleShape),
-            shape = CircleShape
+        Column(
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Icon(Icons.Default.Public, contentDescription = "Query Overpass API OSM POIs", modifier = Modifier.size(22.dp))
-        }
-
-        // Add Place or Event (➕) button
-        FloatingActionButton(
-            onClick = onAddPlace,
-            containerColor = Color(0xFF0F1524),
-            contentColor = Color(0xFF00E5FF),
-            modifier = Modifier
-                .size(48.dp)
-                .border(1.5.dp, Color(0xFF00E5FF), CircleShape),
-            shape = CircleShape
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Add Place to Map", modifier = Modifier.size(24.dp))
-        }
-
-        // SOS Urgency panic button
-        FloatingActionButton(
-            onClick = onSosClick,
-            containerColor = Color(0xFFFF2D55),
-            contentColor = Color.White,
-            modifier = Modifier
-                .size(48.dp)
-                .border(1.5.dp, Color.White.copy(alpha = 0.4f), CircleShape),
-            shape = CircleShape
-        ) {
-            Icon(Icons.Default.Warning, contentDescription = "SOS Rescue Guard", modifier = Modifier.size(22.dp))
-        }
-
-        // Vibe heat indicator switch
-        FloatingActionButton(
-            onClick = onToggleHeatmap,
-            containerColor = Color(0xFF0F1524),
-            contentColor = if (isHeatmapEnabled) Color(0xFFFF2D55) else Color.White,
-            modifier = Modifier
-                .size(48.dp)
-                .border(1.dp, if (isHeatmapEnabled) Color(0xFFFF2D55) else Color.White.copy(alpha = 0.15f), CircleShape),
-            shape = CircleShape
-        ) {
-            Icon(
-                imageVector = if (isHeatmapEnabled) Icons.Default.LocalFireDepartment else Icons.Outlined.LocalFireDepartment,
-                contentDescription = "Vibe Hotspots Map Heat",
-                modifier = Modifier.size(22.dp)
+            // 1. Add Business
+            ActionButtonItem(
+                icon = Icons.Default.Add,
+                iconTint = Color(0xFF8B5CF6),
+                label = "Add\nBusiness",
+                onClick = onAddPlace
             )
-        }
 
-        // Recenter onto Sandton / Rosebank Location
-        FloatingActionButton(
-            onClick = onRecenter,
-            containerColor = Color(0xFF0F1524),
-            contentColor = Color(0xFF00E5FF),
-            modifier = Modifier
-                .size(48.dp)
-                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f), CircleShape),
-            shape = CircleShape
-        ) {
-            Icon(Icons.Default.MyLocation, contentDescription = "Recenter user location", modifier = Modifier.size(20.dp))
+            // 2. Nightguard
+            ActionButtonItem(
+                icon = Icons.Default.Shield,
+                iconTint = Color(0xFF8B5CF6),
+                label = "Nightguard",
+                onClick = onSosClick
+            )
+
+            // 3. Recenter
+            ActionButtonItem(
+                icon = Icons.Default.MyLocation,
+                iconTint = Color.White,
+                label = "Recenter",
+                onClick = onRecenter
+            )
+
+            // 4. Download map
+            ActionButtonItem(
+                icon = Icons.Default.Download,
+                iconTint = Color.White,
+                label = "Download\nmap",
+                onClick = onDownloadMapClick
+            )
         }
     }
 }
+
+@Composable
+private fun ActionButtonItem(
+    icon: ImageVector,
+    iconTint: Color,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 2.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = iconTint,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            lineHeight = 11.sp
+        )
+    }
+}
+

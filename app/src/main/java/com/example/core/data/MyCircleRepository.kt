@@ -387,6 +387,7 @@ object MyCircleRepository {
 
     private fun initFirebaseSync() {
         try {
+            com.google.firebase.FirebaseApp.getInstance()
             val db = FirebaseFirestore.getInstance()
             firestore = db
             db.collection("stories").addSnapshotListener { snapshot, error ->
@@ -428,8 +429,8 @@ object MyCircleRepository {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e("MyCircleRepository", "Firestore stories init skipped or unavailable", e)
+        } catch (e: Throwable) {
+            Log.w("MyCircleRepository", "Firestore stories init skipped or unavailable: ${e.message}")
         }
     }
 

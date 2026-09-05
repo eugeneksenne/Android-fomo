@@ -43,7 +43,7 @@ googleServices = "4.5.0"
 credentials = "1.5.0"
 googleid = "1.1.1"
 oboe = "1.9.0"
-hilt = "2.51.1"
+hilt = "2.59"
 hilt-compose = "1.2.0"
 hilt-navigation-compose = "1.2.0"
 

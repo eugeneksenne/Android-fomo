@@ -23,19 +23,6 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    externalNativeBuild {
-      cmake {
-        cppFlags("-std=c++17")
-        arguments("-DANDROID_STL=c++_shared")
-      }
-    }
-  }
-
-  externalNativeBuild {
-    cmake {
-      path = file("src/main/cpp/CMakeLists.txt")
-      version = "3.22.1"
-    }
   }
 
   signingConfigs {
@@ -134,7 +121,7 @@ dependencies {
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
-  implementation(libs.oboe)
+  // implementation(libs.oboe)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)

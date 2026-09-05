@@ -81,6 +81,7 @@ object FeedRepository {
 
     fun initFirebaseSync() {
         try {
+            com.google.firebase.FirebaseApp.getInstance()
             val db = FirebaseFirestore.getInstance()
             firestore = db
 
@@ -139,8 +140,8 @@ object FeedRepository {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e("FeedRepository", "Firestore init skipped or unavailable", e)
+        } catch (e: Throwable) {
+            Log.w("FeedRepository", "Firestore init skipped or unavailable: ${e.message}")
         }
     }
 
